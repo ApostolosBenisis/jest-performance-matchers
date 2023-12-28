@@ -147,6 +147,31 @@ describe('Test the performance of asynchronous code', () => {
 });
 ```
 
+## How to Contribute
+
+Contributions from the community are highly appreciated. Here are ways you can contribute to this project:
+1. **Reporting Issues**: If you find bugs or have suggestions, open an issue.
+
+2. **Code Contributions**: Submit code changes through pull requests.
+
+3. **Documentation**: Improve project documentation through pull requests.
+
+4. **Support**: Simply give the project a star, your support is greatly appreciated!
+
+
+### Getting Started
+
+1. Fork the repository and clone it to your local environment.
+
+2. Create a new branch for your changes.
+
+3. Make your changes, commit them with descriptive messages, and push to your forked repository.
+
+4. Create a **Pull Request** (PR) from your branch to the main repository.
+
+
+If you have any questions, feel free to reach out. Happy coding!
+
 ## License
 
 [MIT License](./LICENSE)
