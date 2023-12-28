@@ -135,12 +135,12 @@ declare global {
                 quantile: number
             }): R;
 
-            toResolveWithin(expectedDurationInMilliseconds: number): R;
+            toResolveWithin(expectedDurationInMilliseconds: number): Promise<R>;
 
             toResolveWithinQuantile(expectedDurationInMilliseconds: number, options: {
                 iterations: number,
                 quantile: number
-            }): R;
+            }): Promise<R>;
         }
     }
 }
