@@ -1,6 +1,6 @@
 {
   "name": "jest-performance-matchers",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A minimalistic library with jest matchers(assertions) for measuring code performance",
   "main": "main.js",
   "types": "main.d.ts",
