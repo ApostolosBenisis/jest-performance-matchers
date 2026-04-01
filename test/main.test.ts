@@ -219,6 +219,39 @@ describe("Test jest expect.toCompleteWithinQuantile assertion", () => {
         // AND quantile arguments are (Q), function durations
         expect(metrics.calcQuantile).toHaveBeenCalledWith(Q, T_Array);
     });
+
+    test("Should run warmup iterations before measured iterations", () => {
+        // GIVEN a function with warmup and measured iterations
+        const T = 10;
+        const I = 3;
+        const W = 2;
+        // AND hrtime is mocked for warmup (W * 2 calls) + measured (I * 2 calls)
+        mockFunctionProcessTimes(Array(W + I).fill(T));
+        const mockFn = jest.fn();
+
+        // WHEN asserting with warmup
+        expect(mockFn).toCompleteWithinQuantile(T, {iterations: I, quantile: 1, warmup: W});
+
+        // THEN expect the callback to have been called warmup + iterations times
+        expect(mockFn).toBeCalledTimes(W + I);
+    });
+
+    test("Should only include measured iterations in durations when warmup is used", () => {
+        // GIVEN a function with warmup iterations
+        const T = 10;
+        const I = 3;
+        const W = 2;
+        const T_Array = Array(I).fill(T);
+        mockFunctionProcessTimes(Array(W + I).fill(T));
+        const mockFn = jest.fn();
+
+        // WHEN asserting with warmup
+        jest.spyOn(metrics, 'calcQuantile');
+        expect(mockFn).toCompleteWithinQuantile(T, {iterations: I, quantile: 1, warmup: W});
+
+        // THEN only measured iterations are passed to calcQuantile
+        expect(metrics.calcQuantile).toHaveBeenCalledWith(1, T_Array);
+    });
 });
 
 describe("Test jest expect.toResolveWithinQuantile assertion", () => {
@@ -317,6 +350,38 @@ describe("Test jest expect.toResolveWithinQuantile assertion", () => {
         expect(mockFn).toBeCalledTimes(I);
         // AND quantile arguments are (Q), function durations
         expect(metrics.calcQuantile).toHaveBeenCalledWith(Q, T_Array);
+    });
+
+    test("Should run warmup iterations before measured iterations", async () => {
+        // GIVEN a promise with warmup and measured iterations
+        const T = 10;
+        const I = 3;
+        const W = 2;
+        mockFunctionProcessTimes(Array(W + I).fill(T));
+        const mockFn = jest.fn(() => Promise.resolve());
+
+        // WHEN asserting with warmup
+        await expect(mockFn).toResolveWithinQuantile(T, {iterations: I, quantile: 1, warmup: W});
+
+        // THEN expect the callback to have been called warmup + iterations times
+        expect(mockFn).toBeCalledTimes(W + I);
+    });
+
+    test("Should only include measured iterations in durations when warmup is used", async () => {
+        // GIVEN a promise with warmup iterations
+        const T = 10;
+        const I = 3;
+        const W = 2;
+        const T_Array = Array(I).fill(T);
+        mockFunctionProcessTimes(Array(W + I).fill(T));
+        const mockFn = jest.fn(() => Promise.resolve());
+
+        // WHEN asserting with warmup
+        jest.spyOn(metrics, 'calcQuantile');
+        await expect(mockFn).toResolveWithinQuantile(T, {iterations: I, quantile: 1, warmup: W});
+
+        // THEN only measured iterations are passed to calcQuantile
+        expect(metrics.calcQuantile).toHaveBeenCalledWith(1, T_Array);
     });
 });
 
@@ -457,6 +522,24 @@ describe("Input validation", () => {
             expect(() => {
                 expect(() => undefined).toCompleteWithinQuantile(10, {iterations: 5, quantile: 0});
             }).toThrowError("jest-performance-matchers: quantile must be an integer between 1 and 100, received 0");
+        });
+
+        test("should throw when warmup is negative", () => {
+            // GIVEN negative warmup
+            // WHEN asserting toCompleteWithinQuantile
+            // THEN expect a descriptive error
+            expect(() => {
+                expect(() => undefined).toCompleteWithinQuantile(10, {iterations: 5, quantile: 95, warmup: -1});
+            }).toThrowError("jest-performance-matchers: warmup must be a non-negative integer, received -1");
+        });
+
+        test("should throw when warmup is a float", () => {
+            // GIVEN float warmup
+            // WHEN asserting toCompleteWithinQuantile
+            // THEN expect a descriptive error
+            expect(() => {
+                expect(() => undefined).toCompleteWithinQuantile(10, {iterations: 5, quantile: 95, warmup: 1.5});
+            }).toThrowError("jest-performance-matchers: warmup must be a non-negative integer, received 1.5");
         });
     });
 

@@ -19,7 +19,7 @@ function validateDuration(expectedDurationInMilliseconds: number): void {
     }
 }
 
-function validateQuantileOptions(options: { iterations: number, quantile: number }): void {
+function validateQuantileOptions(options: { iterations: number, quantile: number, warmup?: number }): void {
     if (!options || typeof options !== 'object') {
         throw new Error('jest-performance-matchers: options must be an object with iterations and quantile');
     }
@@ -28,6 +28,9 @@ function validateQuantileOptions(options: { iterations: number, quantile: number
     }
     if (!Number.isInteger(options.quantile) || options.quantile < 1 || options.quantile > 100) {
         throw new Error(`jest-performance-matchers: quantile must be an integer between 1 and 100, received ${options.quantile}`);
+    }
+    if (options.warmup !== undefined && (!Number.isInteger(options.warmup) || options.warmup < 0)) {
+        throw new Error(`jest-performance-matchers: warmup must be a non-negative integer, received ${options.warmup}`);
     }
 }
 
@@ -56,7 +59,8 @@ function toCompleteWithin(callback: () => unknown, expectedDurationInMillisecond
  */
 function toCompleteWithinQuantile(callback: () => unknown, expectedDurationInMilliseconds: number, options: {
     iterations: number,
-    quantile: number
+    quantile: number,
+    warmup?: number
 }) {
     validateCallback(callback);
     validateDuration(expectedDurationInMilliseconds);
@@ -64,6 +68,11 @@ function toCompleteWithinQuantile(callback: () => unknown, expectedDurationInMil
 
     const count = options.iterations;
     const quantile = options.quantile;
+    const warmup = options.warmup ?? 0;
+
+    for (let i = 0; i < warmup; i++) {
+        callback();
+    }
 
     const durations: number[] = [];
     for (let i = 0; i < count; i++) {
@@ -100,7 +109,8 @@ async function toResolveWithin(promise: () => Promise<unknown>, expectedDuration
  */
 async function toResolveWithinQuantile(promise: () => Promise<unknown>, expectedDurationInMilliseconds: number, options: {
     iterations: number,
-    quantile: number
+    quantile: number,
+    warmup?: number
 }) {
     validateCallback(promise);
     validateDuration(expectedDurationInMilliseconds);
@@ -108,6 +118,11 @@ async function toResolveWithinQuantile(promise: () => Promise<unknown>, expected
 
     const count = options.iterations;
     const quantile = options.quantile;
+    const warmup = options.warmup ?? 0;
+
+    for (let i = 0; i < warmup; i++) {
+        await promise();
+    }
 
     const durations: number[] = [];
     for (let i = 0; i < count; i++) {
@@ -177,14 +192,16 @@ declare global {
 
             toCompleteWithinQuantile(expectedDurationInMilliseconds: number, options: {
                 iterations: number,
-                quantile: number
+                quantile: number,
+                warmup?: number
             }): R;
 
             toResolveWithin(expectedDurationInMilliseconds: number): Promise<R>;
 
             toResolveWithinQuantile(expectedDurationInMilliseconds: number, options: {
                 iterations: number,
-                quantile: number
+                quantile: number,
+                warmup?: number
             }): Promise<R>;
         }
     }
