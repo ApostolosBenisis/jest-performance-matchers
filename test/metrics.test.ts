@@ -1,4 +1,4 @@
-import {calcQuantile} from "../src/metrics";
+import {calcQuantile, calcStats} from "../src/metrics";
 
 describe("Test calcQuantile function", () => {
     test.each([
@@ -18,8 +18,13 @@ describe("Test calcQuantile function", () => {
         [75, [-1, 0, 2], 1],
         [100, [-1, 0, 2], 2],
     ])("should successfully calculate quantiles", (q, data, result) => {
-        // @ts-ignore
-        expect(calcQuantile(q, data)).toEqual(result);
+        expect(calcQuantile(q as number, data as number[])).toEqual(result);
+    });
+
+    test("should not mutate the input array", () => {
+        const data = [3, 1, 2];
+        calcQuantile(50, data);
+        expect(data).toEqual([3, 1, 2]);
     });
 
     test.each([
@@ -29,7 +34,7 @@ describe("Test calcQuantile function", () => {
         ["not an array of numbers", ["NaN", "0.2"]],
         ["an empty array", []]
     ])("should throw an error when data is %s", (description, data) => {
-        // @ts-ignore
+        // @ts-expect-error - intentionally passing invalid data for testing
         expect(() => calcQuantile(50, data)).toThrowError(/Data must be an array of numbers and must contain at least one element/);
     });
     test.each([
@@ -38,7 +43,42 @@ describe("Test calcQuantile function", () => {
         ["NaN", "string"],
         ["not an integer", 0.1]
     ])("should throw an error when value is %s", (description, q) => {
-        // @ts-ignore
+        // @ts-expect-error - intentionally passing invalid quantile for testing
         expect(() => calcQuantile(q, [])).toThrowError(/Quantile must be an integer greater than 0 and less than or equal to 100/);
+    });
+});
+
+describe("Test calcStats function", () => {
+    test("should calculate stats for a simple dataset", () => {
+        const stats = calcStats([1, 2, 3, 4, 5]);
+        expect(stats.min).toBe(1);
+        expect(stats.max).toBe(5);
+        expect(stats.mean).toBe(3);
+        expect(stats.median).toBe(3);
+        expect(stats.stddev).toBeCloseTo(Math.sqrt(2), 10);
+    });
+
+    test("should calculate stats for a single value", () => {
+        const stats = calcStats([42]);
+        expect(stats.min).toBe(42);
+        expect(stats.max).toBe(42);
+        expect(stats.mean).toBe(42);
+        expect(stats.median).toBe(42);
+        expect(stats.stddev).toBe(0);
+    });
+
+    test("should calculate stats for identical values", () => {
+        const stats = calcStats([10, 10, 10]);
+        expect(stats.min).toBe(10);
+        expect(stats.max).toBe(10);
+        expect(stats.mean).toBe(10);
+        expect(stats.median).toBe(10);
+        expect(stats.stddev).toBe(0);
+    });
+
+    test("should not mutate the input array", () => {
+        const data = [3, 1, 2];
+        calcStats(data);
+        expect(data).toEqual([3, 1, 2]);
     });
 });
