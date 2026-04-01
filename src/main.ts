@@ -146,14 +146,14 @@ function assertDurationQuantile(iterations: number, quantile: number,  quantileV
     if (quantileValue <= expectedDurationInMilliseconds) {
         return {
             message: () =>
-                // @ts-ignore
+
                 `expected that ${quantile}% of the time when running ${iterations} iterations,\nthe function duration to be greater than ${printExpected(expectedDurationInMilliseconds)} (ms),\ninstead it was ${printReceived(quantileValue)} (ms)\n${statsLine}`,
             pass: true,
         };
     } else {
         return {
             message: () =>
-                // @ts-ignore
+
                 `expected that ${quantile}% of the time when running ${iterations} iterations,\nthe function duration to be less or equal to ${printExpected(expectedDurationInMilliseconds)} (ms),\ninstead it was ${printReceived(quantileValue)} (ms)\n${statsLine}`,
             pass: false,
         };
@@ -164,14 +164,14 @@ function assertDuration(actualDuration: number, expectedDurationInMilliseconds: 
     if (actualDuration <= expectedDurationInMilliseconds) {
         return {
             message: () =>
-                // @ts-ignore
+
                 `expected function duration ${printReceived(actualDuration)} (ms) to be greater than ${printExpected(expectedDurationInMilliseconds)} (ms)`,
             pass: true,
         };
     } else {
         return {
             message: () =>
-                // @ts-ignore
+
                 `expected function duration ${printReceived(actualDuration)} (ms) to be less or equal to ${printExpected(expectedDurationInMilliseconds)} (ms)`,
             pass: false,
         };
