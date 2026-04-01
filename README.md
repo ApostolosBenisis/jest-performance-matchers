@@ -16,7 +16,7 @@ A minimalistic library with jest matchers(assertions) for measuring code perform
 jest-performance-matchers only supports
 
 - Jest version 27.0.0 and newer
-- Node.js version 14.0.0 and newer
+- Node.js version 18.0.0 and newer
 
 ## How to install
 
