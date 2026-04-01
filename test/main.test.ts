@@ -319,3 +319,166 @@ describe("Test jest expect.toResolveWithinQuantile assertion", () => {
         expect(metrics.calcQuantile).toHaveBeenCalledWith(Q, T_Array);
     });
 });
+
+describe("Input validation", () => {
+    beforeEach(() => {
+        jest.restoreAllMocks();
+    });
+
+    describe("toCompleteWithin", () => {
+        test("should throw when received value is not a function", () => {
+            // GIVEN a non-function value
+            const givenValue = "not a function";
+
+            // WHEN asserting toCompleteWithin
+            // THEN expect a descriptive error
+            expect(() => {
+                (expect(givenValue as unknown) as unknown as jest.Matchers<void>).toCompleteWithin(10);
+            }).toThrowError("jest-performance-matchers: expected value must be a function, received string");
+        });
+
+        test("should throw when duration is negative", () => {
+            // GIVEN a negative duration
+            const givenDuration = -5;
+
+            // WHEN asserting toCompleteWithin with negative duration
+            // THEN expect a descriptive error
+            expect(() => {
+                expect(() => undefined).toCompleteWithin(givenDuration);
+            }).toThrowError("jest-performance-matchers: expected duration must be a positive number, received -5");
+        });
+
+        test("should throw when duration is zero", () => {
+            // GIVEN a zero duration
+            const givenDuration = 0;
+
+            // WHEN asserting toCompleteWithin with zero duration
+            // THEN expect a descriptive error
+            expect(() => {
+                expect(() => undefined).toCompleteWithin(givenDuration);
+            }).toThrowError("jest-performance-matchers: expected duration must be a positive number, received 0");
+        });
+
+        test("should throw when duration is NaN", () => {
+            // GIVEN NaN as duration
+            // WHEN asserting toCompleteWithin
+            // THEN expect a descriptive error
+            expect(() => {
+                expect(() => undefined).toCompleteWithin(NaN);
+            }).toThrowError("jest-performance-matchers: expected duration must be a positive number, received NaN");
+        });
+
+        test("should throw when duration is Infinity", () => {
+            // GIVEN Infinity as duration
+            // WHEN asserting toCompleteWithin
+            // THEN expect a descriptive error
+            expect(() => {
+                expect(() => undefined).toCompleteWithin(Infinity);
+            }).toThrowError("jest-performance-matchers: expected duration must be a positive number, received Infinity");
+        });
+    });
+
+    describe("toResolveWithin", () => {
+        test("should throw when received value is not a function", async () => {
+            // GIVEN a non-function value
+            const givenValue = 42;
+
+            // WHEN asserting toResolveWithin
+            // THEN expect a descriptive error
+            await expect(async () => {
+                await (expect(givenValue as unknown) as unknown as jest.Matchers<Promise<void>>).toResolveWithin(10);
+            }).rejects.toThrowError("jest-performance-matchers: expected value must be a function, received number");
+        });
+
+        test("should throw when duration is negative", async () => {
+            // GIVEN a negative duration
+            const givenDuration = -5;
+
+            // WHEN asserting toResolveWithin with negative duration
+            // THEN expect a descriptive error
+            await expect(async () => {
+                await expect(async () => Promise.resolve()).toResolveWithin(givenDuration);
+            }).rejects.toThrowError("jest-performance-matchers: expected duration must be a positive number, received -5");
+        });
+    });
+
+    describe("toCompleteWithinQuantile", () => {
+        test("should throw when received value is not a function", () => {
+            // GIVEN a non-function value
+            const givenValue = null;
+
+            // WHEN asserting toCompleteWithinQuantile
+            // THEN expect a descriptive error
+            expect(() => {
+                (expect(givenValue as unknown) as unknown as jest.Matchers<void>).toCompleteWithinQuantile(10, {iterations: 5, quantile: 95});
+            }).toThrowError("jest-performance-matchers: expected value must be a function, received object");
+        });
+
+        test("should throw when options is not provided", () => {
+            // GIVEN no options
+            // WHEN asserting toCompleteWithinQuantile without options
+            // THEN expect a descriptive error
+            expect(() => {
+                (expect(() => undefined) as unknown as jest.Matchers<void>).toCompleteWithinQuantile(10, undefined as unknown as { iterations: number, quantile: number });
+            }).toThrowError("jest-performance-matchers: options must be an object with iterations and quantile");
+        });
+
+        test("should throw when iterations is not a positive integer", () => {
+            // GIVEN invalid iterations
+            // WHEN asserting toCompleteWithinQuantile
+            // THEN expect a descriptive error
+            expect(() => {
+                expect(() => undefined).toCompleteWithinQuantile(10, {iterations: 0, quantile: 95});
+            }).toThrowError("jest-performance-matchers: iterations must be a positive integer, received 0");
+        });
+
+        test("should throw when iterations is a float", () => {
+            // GIVEN float iterations
+            // WHEN asserting toCompleteWithinQuantile
+            // THEN expect a descriptive error
+            expect(() => {
+                expect(() => undefined).toCompleteWithinQuantile(10, {iterations: 1.5, quantile: 95});
+            }).toThrowError("jest-performance-matchers: iterations must be a positive integer, received 1.5");
+        });
+
+        test("should throw when quantile is out of range", () => {
+            // GIVEN quantile > 100
+            // WHEN asserting toCompleteWithinQuantile
+            // THEN expect a descriptive error
+            expect(() => {
+                expect(() => undefined).toCompleteWithinQuantile(10, {iterations: 5, quantile: 101});
+            }).toThrowError("jest-performance-matchers: quantile must be an integer between 1 and 100, received 101");
+        });
+
+        test("should throw when quantile is zero", () => {
+            // GIVEN quantile = 0
+            // WHEN asserting toCompleteWithinQuantile
+            // THEN expect a descriptive error
+            expect(() => {
+                expect(() => undefined).toCompleteWithinQuantile(10, {iterations: 5, quantile: 0});
+            }).toThrowError("jest-performance-matchers: quantile must be an integer between 1 and 100, received 0");
+        });
+    });
+
+    describe("toResolveWithinQuantile", () => {
+        test("should throw when received value is not a function", async () => {
+            // GIVEN a non-function value
+            const givenValue = true;
+
+            // WHEN asserting toResolveWithinQuantile
+            // THEN expect a descriptive error
+            await expect(async () => {
+                await (expect(givenValue as unknown) as unknown as jest.Matchers<Promise<void>>).toResolveWithinQuantile(10, {iterations: 5, quantile: 95});
+            }).rejects.toThrowError("jest-performance-matchers: expected value must be a function, received boolean");
+        });
+
+        test("should throw when iterations is negative", async () => {
+            // GIVEN negative iterations
+            // WHEN asserting toResolveWithinQuantile
+            // THEN expect a descriptive error
+            await expect(async () => {
+                await expect(async () => Promise.resolve()).toResolveWithinQuantile(10, {iterations: -1, quantile: 95});
+            }).rejects.toThrowError("jest-performance-matchers: iterations must be a positive integer, received -1");
+        });
+    });
+});

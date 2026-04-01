@@ -7,12 +7,39 @@ const nowInMillis = () => {
     return hrTime[0] * 1000 + hrTime[1] / 1000000;
 };
 
+function validateCallback(callback: unknown): void {
+    if (typeof callback !== 'function') {
+        throw new Error(`jest-performance-matchers: expected value must be a function, received ${typeof callback}`);
+    }
+}
+
+function validateDuration(expectedDurationInMilliseconds: number): void {
+    if (typeof expectedDurationInMilliseconds !== 'number' || !Number.isFinite(expectedDurationInMilliseconds) || expectedDurationInMilliseconds <= 0) {
+        throw new Error(`jest-performance-matchers: expected duration must be a positive number, received ${expectedDurationInMilliseconds}`);
+    }
+}
+
+function validateQuantileOptions(options: { iterations: number, quantile: number }): void {
+    if (!options || typeof options !== 'object') {
+        throw new Error('jest-performance-matchers: options must be an object with iterations and quantile');
+    }
+    if (!Number.isInteger(options.iterations) || options.iterations <= 0) {
+        throw new Error(`jest-performance-matchers: iterations must be a positive integer, received ${options.iterations}`);
+    }
+    if (!Number.isInteger(options.quantile) || options.quantile < 1 || options.quantile > 100) {
+        throw new Error(`jest-performance-matchers: quantile must be an integer between 1 and 100, received ${options.quantile}`);
+    }
+}
+
 /**
  * Assert that the synchronous code runs within the given duration.
  * @param callback The callback to execute and measure
  * @param expectedDurationInMilliseconds The expected duration in milliseconds
  **/
 function toCompleteWithin(callback: () => unknown, expectedDurationInMilliseconds: number) {
+    validateCallback(callback);
+    validateDuration(expectedDurationInMilliseconds);
+
     const t0 = nowInMillis();
     callback();
     const t1 = nowInMillis();
@@ -31,8 +58,12 @@ function toCompleteWithinQuantile(callback: () => unknown, expectedDurationInMil
     iterations: number,
     quantile: number
 }) {
-    const count = options?.iterations;
-    const quantile = options?.quantile;
+    validateCallback(callback);
+    validateDuration(expectedDurationInMilliseconds);
+    validateQuantileOptions(options);
+
+    const count = options.iterations;
+    const quantile = options.quantile;
 
     const durations: number[] = [];
     for (let i = 0; i < count; i++) {
@@ -51,6 +82,9 @@ function toCompleteWithinQuantile(callback: () => unknown, expectedDurationInMil
  * @param expectedDurationInMilliseconds The expected duration in milliseconds
  */
 async function toResolveWithin(promise: () => Promise<unknown>, expectedDurationInMilliseconds: number) {
+    validateCallback(promise);
+    validateDuration(expectedDurationInMilliseconds);
+
     const t0 = nowInMillis();
     await promise();
     const t1 = nowInMillis();
@@ -68,8 +102,12 @@ async function toResolveWithinQuantile(promise: () => Promise<unknown>, expected
     iterations: number,
     quantile: number
 }) {
+    validateCallback(promise);
+    validateDuration(expectedDurationInMilliseconds);
+    validateQuantileOptions(options);
+
     const count = options.iterations;
-    const quantile = options?.quantile;
+    const quantile = options.quantile;
 
     const durations: number[] = [];
     for (let i = 0; i < count; i++) {
