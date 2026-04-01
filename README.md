@@ -15,7 +15,7 @@ A minimalistic library with jest matchers(assertions) for measuring code perform
 
 jest-performance-matchers only supports
 
-- Jest version 27.0.0 and newer
+- Jest version 27.0.0 and newer (including Jest 29)
 - Node.js version 18.0.0 and newer
 
 ## How to install
@@ -23,33 +23,37 @@ jest-performance-matchers only supports
 With npm:
 
 ```
-npm intall --save-dev jest-performance-matchers
+npm install --save-dev jest-performance-matchers
 ```
 
 ## Setup
 
 Either import the matcher in test you want to use them :
 
-```
+```ts
 import 'jest-performance-matchers';
 ```
 
 Or create a setup script and add to `setupFilesAfterEnv` as instructed
 in [Configuring Jest](https://jestjs.io/docs/configuration#setupfilesafterenv-array) :
 
-```
-// setupPerformanceMatchers.js
+```ts
+// setupPerformanceMatchers.ts
 
 import 'jest-performance-matchers';
 ```
 
-```
+```js
 // jest.config.js
 
 "jest": {
-  "setupFilesAfterEnv": ['<rootDir>/setupPerformanceMatchers.js']
+  "setupFilesAfterEnv": ['<rootDir>/setupPerformanceMatchers.ts']
 }
 ```
+
+> **TypeScript:** If you are using `ts-jest`, importing `jest-performance-matchers` will
+> automatically register the custom matchers and their type declarations — no extra
+> setup is needed.
 
 ## How to use the matchers
 
@@ -57,7 +61,7 @@ import 'jest-performance-matchers';
 
 Assert that the synchronous code runs within the given duration:
 
-```js
+```ts
 import 'jest-performance-matchers';
 
 describe('Test the performance of synchronous code', () => {
@@ -79,7 +83,7 @@ describe('Test the performance of synchronous code', () => {
 
 Assert that the synchronous code executed for `I` times, runs `Q`% the time within the given duration:
 
-```js
+```ts
 import 'jest-performance-matchers';
 
 describe('Test the performance of synchronous code', () => {
@@ -94,6 +98,12 @@ describe('Test the performance of synchronous code', () => {
             // Do something that 95% of the time should not complete in less 10 ms;
         }).not.toCompleteWithinQuantile(10, {iterations: 100, quantile: 95});
     });
+
+    test("With warmup to exclude JIT compilation overhead", () => {
+        expect(() => {
+            // Do something with 5 warmup iterations before 100 measured iterations;
+        }).toCompleteWithinQuantile(10, {iterations: 100, quantile: 95, warmup: 5});
+    });
 });
 ```
 
@@ -101,7 +111,7 @@ describe('Test the performance of synchronous code', () => {
 
 Assert that the asynchronous code resolves within the given duration:
 
-```js
+```ts
 import 'jest-performance-matchers';
 
 describe('Test the performance of asynchronous code', () => {
@@ -129,7 +139,7 @@ describe('Test the performance of asynchronous code', () => {
 
 Assert that the asynchronous code resolves for `I` times, runs `Q`% the time within the given duration:
 
-```js
+```ts
 import 'jest-performance-matchers';
 
 describe('Test the performance of asynchronous code', () => {
@@ -143,6 +153,12 @@ describe('Test the performance of asynchronous code', () => {
         await expect(() => {
             // return a promise that 95% of the time should not resolve in less than 10 ms;
         }).not.toResolveWithinQuantile(10, {iterations: 100, quantile: 95});
+    });
+
+    test("With warmup to exclude cold-start overhead", async () => {
+        await expect(async () => {
+            // await for a promise with 5 warmup iterations before 100 measured iterations;
+        }).toResolveWithinQuantile(10, {iterations: 100, quantile: 95, warmup: 5});
     });
 });
 ```
