@@ -1,6 +1,6 @@
 import {expect} from '@jest/globals';
 import {printReceived, printExpected} from 'jest-matcher-utils';
-import {calcQuantile} from "./metrics";
+import {calcQuantile, calcStats} from "./metrics";
 
 const nowInMillis = () => {
     const hrTime = process.hrtime();
@@ -82,19 +82,26 @@ async function toResolveWithinQuantile(promise: () => Promise<unknown>, expected
     return assertDurationQuantile(count, quantile, quantileValue, durations, expectedDurationInMilliseconds);
 }
 
+function formatDuration(value: number): string {
+    return value.toFixed(2);
+}
+
 function assertDurationQuantile(iterations: number, quantile: number,  quantileValue: number, durations: number[], expectedDurationInMilliseconds: number) {
+    const stats = calcStats(durations);
+    const statsLine = `Statistics: min=${formatDuration(stats.min)}, max=${formatDuration(stats.max)}, mean=${formatDuration(stats.mean)}, median=${formatDuration(stats.median)}, stddev=${formatDuration(stats.stddev)}`;
+
     if (quantileValue <= expectedDurationInMilliseconds) {
         return {
             message: () =>
                 // @ts-ignore
-                `expected that ${quantile}% of the time when running ${iterations} iterations,\nthe function duration to be greater than ${printExpected(expectedDurationInMilliseconds)} (ms),\ninstead it was ${printReceived(quantileValue)} (ms)\nDurations:${durations}`,
+                `expected that ${quantile}% of the time when running ${iterations} iterations,\nthe function duration to be greater than ${printExpected(expectedDurationInMilliseconds)} (ms),\ninstead it was ${printReceived(quantileValue)} (ms)\n${statsLine}`,
             pass: true,
         };
     } else {
         return {
             message: () =>
                 // @ts-ignore
-                `expected that ${quantile}% of the time when running ${iterations} iterations,\nthe function duration to be less or equal to ${printExpected(expectedDurationInMilliseconds)} (ms),\ninstead it was ${printReceived(quantileValue)} (ms)\nDurations:${durations}`,
+                `expected that ${quantile}% of the time when running ${iterations} iterations,\nthe function duration to be less or equal to ${printExpected(expectedDurationInMilliseconds)} (ms),\ninstead it was ${printReceived(quantileValue)} (ms)\n${statsLine}`,
             pass: false,
         };
     }

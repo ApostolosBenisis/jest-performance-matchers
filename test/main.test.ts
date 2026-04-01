@@ -5,15 +5,11 @@ import {printExpected, printReceived} from "jest-matcher-utils";
 
 function mockFunctionProcessTime(milliseconds: number) {
     mockFunctionProcessTimes([milliseconds]);
-    /*
-    let calledTimes = 0;
-    jest.spyOn(process, "hrtime").mockImplementation(() => {
-        calledTimes++;
-        if (calledTimes === 1) {
-            return [1, 0];
-        }
-        return [1, 1000000 * milliseconds];
-    });*/
+}
+
+function buildStatsLine(durations: number[]): string {
+    const stats = metrics.calcStats(durations);
+    return `Statistics: min=${stats.min.toFixed(2)}, max=${stats.max.toFixed(2)}, mean=${stats.mean.toFixed(2)}, median=${stats.median.toFixed(2)}, stddev=${stats.stddev.toFixed(2)}`;
 }
 
 function mockFunctionProcessTimes(milliseconds: number[]) {
@@ -175,33 +171,35 @@ describe("Test jest expect.toCompleteWithinQuantile assertion", () => {
     test("Should fail the assertion", () => {
         // GIVEN a function takes (T) milliseconds to complete each of the (I) times it will be called
         const T = 10;
-        const I = 5
+        const I = 5;
         const T_Array = Array(I).fill(T);
         mockFunctionProcessTimes(T_Array);
 
         // WHEN asserting that (Q%) of the times when running for (I) iterations, the function will complete in (T) - 1 milliseconds
         // THEN expect to fail
-        const Q = 1
+        const Q = 1;
+        const expectedStatsLine = buildStatsLine(T_Array);
 
         expect(() => {
             expect(() => undefined).toCompleteWithinQuantile(T - 1, {iterations: I, quantile: Q});
-        }).toThrowError(`expected that ${Q}% of the time when running ${I} iterations,\nthe function duration to be less or equal to ${printExpected(T - 1)} (ms),\ninstead it was ${printReceived(T)} (ms)\nDurations:${T_Array}`);
+        }).toThrowError(`expected that ${Q}% of the time when running ${I} iterations,\nthe function duration to be less or equal to ${printExpected(T - 1)} (ms),\ninstead it was ${printReceived(T)} (ms)\n${expectedStatsLine}`);
     });
 
     test("Should not to pass the assertion", () => {
         // GIVEN a function takes (T) milliseconds to complete each of the (I) times it will be called
         const T = 10;
-        const I = 5
+        const I = 5;
         const T_Array = Array(I).fill(T);
         mockFunctionProcessTimes(T_Array);
 
-        // WHEN asserting that (Q%) of the times when running for (I) iterations, the function will complete in (T) - 1 milliseconds
+        // WHEN asserting that (Q%) of the times when running for (I) iterations, the function will complete in (T) milliseconds
         // THEN expect to fail
-        const Q = 1
+        const Q = 1;
+        const expectedStatsLine = buildStatsLine(T_Array);
 
         expect(() => {
             expect(() => undefined).not.toCompleteWithinQuantile(T, {iterations: I, quantile: Q});
-        }).toThrowError(`expected that ${Q}% of the time when running ${I} iterations,\nthe function duration to be greater than ${printExpected(T)} (ms),\ninstead it was ${printReceived(T)} (ms)\nDurations:${T_Array}`);
+        }).toThrowError(`expected that ${Q}% of the time when running ${I} iterations,\nthe function duration to be greater than ${printExpected(T)} (ms),\ninstead it was ${printReceived(T)} (ms)\n${expectedStatsLine}`);
     });
 
     test("Should base calculations of the the expected quantile based on the iterations arguments", () => {
@@ -255,31 +253,33 @@ describe("Test jest expect.toResolveWithinQuantile assertion", () => {
     test("Should fail the assertion", async () => {
         // GIVEN a promise takes (T) milliseconds to resolve each of the (I) times it will be called
         const T = 10;
-        const I = 5
+        const I = 5;
         const T_Array = Array(I).fill(T);
         mockFunctionProcessTimes(T_Array);
 
         // WHEN asserting that (Q%) of the times when running for (I) iterations, the promise will resolve in (T) - 1 milliseconds
         // THEN expect to fail
-        const Q = 1
+        const Q = 1;
+        const expectedStatsLine = buildStatsLine(T_Array);
         await expect(async () => {
             await expect(() => Promise.resolve()).toResolveWithinQuantile(T - 1, {iterations: I, quantile: Q});
-        }).rejects.toThrowError(`expected that ${Q}% of the time when running ${I} iterations,\nthe function duration to be less or equal to ${printExpected(T - 1)} (ms),\ninstead it was ${printReceived(T)} (ms)\nDurations:${T_Array}`);
+        }).rejects.toThrowError(`expected that ${Q}% of the time when running ${I} iterations,\nthe function duration to be less or equal to ${printExpected(T - 1)} (ms),\ninstead it was ${printReceived(T)} (ms)\n${expectedStatsLine}`);
     });
 
     test("Should not to pass the assertion", async () => {
         // GIVEN a promise takes (T) milliseconds to resolve each of the (I) times it will be called
         const T = 10;
-        const I = 5
+        const I = 5;
         const T_Array = Array(I).fill(T);
         mockFunctionProcessTimes(T_Array);
 
         // WHEN asserting that (Q%) of the times when running for (I) iterations, the promise will not resolve in (T) milliseconds
         // THEN expect to fail
-        const Q = 1
+        const Q = 1;
+        const expectedStatsLine = buildStatsLine(T_Array);
         await expect(async () => {
             await expect(() => Promise.resolve()).not.toResolveWithinQuantile(T, {iterations: I, quantile: Q});
-        }).rejects.toThrowError(`expected that ${Q}% of the time when running ${I} iterations,\nthe function duration to be greater than ${printExpected(T)} (ms),\ninstead it was ${printReceived(T)} (ms)\nDurations:${T_Array}`);
+        }).rejects.toThrowError(`expected that ${Q}% of the time when running ${I} iterations,\nthe function duration to be greater than ${printExpected(T)} (ms),\ninstead it was ${printReceived(T)} (ms)\n${expectedStatsLine}`);
     });
 
     test("Should fail the assertion if the promise is rejected", async () => {
