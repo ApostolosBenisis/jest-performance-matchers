@@ -1,6 +1,6 @@
 import {expect} from '@jest/globals';
 import {printReceived, printExpected} from 'jest-matcher-utils';
-import {calcQuantile, calcStats, removeOutliers} from "./metrics";
+import {calcQuantile, calcStats, removeOutliers, Stats} from "./metrics";
 
 const nowInMillis = () => {
     const hrTime = process.hrtime();
@@ -146,22 +146,50 @@ function formatStatValue(value: number | null): string {
     return value === null ? 'N/A' : value.toFixed(2);
 }
 
+function formatStatsBlock(stats: Stats, durations: number[]): string {
+    const ciText = stats.confidenceInterval === null
+        ? '95% CI: N/A (insufficient data)'
+        : `95% CI: [${stats.confidenceInterval[0].toFixed(2)}, ${stats.confidenceInterval[1].toFixed(2)}]ms`;
+    const rmeText = `RME: ${stats.relativeMarginOfError === null ? 'N/A' : stats.relativeMarginOfError.toFixed(2) + '%'}`;
+    const cvText = `CV: ${stats.coefficientOfVariation === null ? 'N/A' : stats.coefficientOfVariation.toFixed(2)}`;
+
+    const p25 = calcQuantile(25, durations);
+    const p50 = stats.median;
+    const p75 = calcQuantile(75, durations);
+    const p90 = calcQuantile(90, durations);
+
+    const lines = [
+        `Statistics (n=${stats.n}): mean=${formatStatValue(stats.mean)}ms, median=${formatStatValue(stats.median)}ms, stddev=${formatStatValue(stats.stddev)}ms`,
+        `${ciText} | ${rmeText} | ${cvText}`,
+        `Distribution: min=${formatStatValue(stats.min)}ms | P25=${formatStatValue(p25)}ms | P50=${formatStatValue(p50)}ms | P75=${formatStatValue(p75)}ms | P90=${formatStatValue(p90)}ms | max=${formatStatValue(stats.max)}ms`,
+    ];
+
+    if (stats.warnings.length > 0) {
+        lines.push('Warnings:');
+        for (const warning of stats.warnings) {
+            lines.push(`  - ${warning}`);
+        }
+    }
+
+    return lines.join('\n');
+}
+
 function assertDurationQuantile(iterations: number, quantile: number,  quantileValue: number, durations: number[], expectedDurationInMilliseconds: number) {
     const stats = calcStats(durations);
-    const statsLine = `Statistics: min=${formatStatValue(stats.min)}, max=${formatStatValue(stats.max)}, mean=${formatStatValue(stats.mean)}, median=${formatStatValue(stats.median)}, stddev=${formatStatValue(stats.stddev)}`;
+    const statsBlock = formatStatsBlock(stats, durations);
 
     if (quantileValue <= expectedDurationInMilliseconds) {
         return {
             message: () =>
 
-                `expected that ${quantile}% of the time when running ${iterations} iterations,\nthe function duration to be greater than ${printExpected(expectedDurationInMilliseconds)} (ms),\ninstead it was ${printReceived(quantileValue)} (ms)\n${statsLine}`,
+                `expected that ${quantile}% of the time when running ${iterations} iterations,\nthe function duration to be greater than ${printExpected(expectedDurationInMilliseconds)} (ms),\ninstead it was ${printReceived(quantileValue)} (ms)\n\n${statsBlock}`,
             pass: true,
         };
     } else {
         return {
             message: () =>
 
-                `expected that ${quantile}% of the time when running ${iterations} iterations,\nthe function duration to be less or equal to ${printExpected(expectedDurationInMilliseconds)} (ms),\ninstead it was ${printReceived(quantileValue)} (ms)\n${statsLine}`,
+                `expected that ${quantile}% of the time when running ${iterations} iterations,\nthe function duration to be less or equal to ${printExpected(expectedDurationInMilliseconds)} (ms),\ninstead it was ${printReceived(quantileValue)} (ms)\n\n${statsBlock}`,
             pass: false,
         };
     }
