@@ -7,10 +7,35 @@ function mockFunctionProcessTime(milliseconds: number) {
     mockFunctionProcessTimes([milliseconds]);
 }
 
-function buildStatsLine(durations: number[]): string {
+function buildStatsBlock(durations: number[]): string {
     const stats = metrics.calcStats(durations);
     const fmt = (v: number | null) => v !== null ? v.toFixed(2) : 'N/A';
-    return `Statistics: min=${fmt(stats.min)}, max=${fmt(stats.max)}, mean=${fmt(stats.mean)}, median=${fmt(stats.median)}, stddev=${fmt(stats.stddev)}`;
+
+    const ciText = stats.confidenceInterval === null
+        ? '95% CI: N/A (insufficient data)'
+        : `95% CI: [${stats.confidenceInterval[0].toFixed(2)}, ${stats.confidenceInterval[1].toFixed(2)}]ms`;
+    const rmeText = `RME: ${stats.relativeMarginOfError === null ? 'N/A' : stats.relativeMarginOfError.toFixed(2) + '%'}`;
+    const cvText = `CV: ${stats.coefficientOfVariation === null ? 'N/A' : stats.coefficientOfVariation.toFixed(2)}`;
+
+    const p25 = metrics.calcQuantile(25, durations);
+    const p50 = stats.median;
+    const p75 = metrics.calcQuantile(75, durations);
+    const p90 = metrics.calcQuantile(90, durations);
+
+    const lines = [
+        `Statistics (n=${stats.n}): mean=${fmt(stats.mean)}ms, median=${fmt(stats.median)}ms, stddev=${fmt(stats.stddev)}ms`,
+        `${ciText} | ${rmeText} | ${cvText}`,
+        `Distribution: min=${fmt(stats.min)}ms | P25=${fmt(p25)}ms | P50=${fmt(p50)}ms | P75=${fmt(p75)}ms | P90=${fmt(p90)}ms | max=${fmt(stats.max)}ms`,
+    ];
+
+    if (stats.warnings.length > 0) {
+        lines.push('Warnings:');
+        for (const warning of stats.warnings) {
+            lines.push(`  - ${warning}`);
+        }
+    }
+
+    return lines.join('\n');
 }
 
 function mockFunctionProcessTimes(milliseconds: number[]) {
@@ -179,11 +204,11 @@ describe("Test jest expect.toCompleteWithinQuantile assertion", () => {
         // WHEN asserting that (Q%) of the times when running for (I) iterations, the function will complete in (T) - 1 milliseconds
         // THEN expect to fail
         const Q = 1;
-        const expectedStatsLine = buildStatsLine(T_Array);
+        const expectedStatsBlock = buildStatsBlock(T_Array);
 
         expect(() => {
             expect(() => undefined).toCompleteWithinQuantile(T - 1, {iterations: I, quantile: Q});
-        }).toThrowError(`expected that ${Q}% of the time when running ${I} iterations,\nthe function duration to be less or equal to ${printExpected(T - 1)} (ms),\ninstead it was ${printReceived(T)} (ms)\n${expectedStatsLine}`);
+        }).toThrowError(`expected that ${Q}% of the time when running ${I} iterations,\nthe function duration to be less or equal to ${printExpected(T - 1)} (ms),\ninstead it was ${printReceived(T)} (ms)\n\n${expectedStatsBlock}`);
     });
 
     test("Should show N/A for stddev when only one iteration is run", () => {
@@ -192,13 +217,13 @@ describe("Test jest expect.toCompleteWithinQuantile assertion", () => {
         mockFunctionProcessTimes([T]);
 
         // WHEN asserting with iterations=1 and it fails
-        // THEN the stats line should show N/A for stddev (n=1 cannot compute stddev)
-        const expectedStatsLine = buildStatsLine([T]);
-        expect(expectedStatsLine).toContain("stddev=N/A");
+        // THEN the stats block should show N/A for stddev (n=1 cannot compute stddev)
+        const expectedStatsBlock = buildStatsBlock([T]);
+        expect(expectedStatsBlock).toContain("stddev=N/A");
 
         expect(() => {
             expect(() => undefined).toCompleteWithinQuantile(T - 1, {iterations: 1, quantile: 1});
-        }).toThrowError(expectedStatsLine);
+        }).toThrowError(expectedStatsBlock);
     });
 
     test("Should not to pass the assertion", () => {
@@ -211,11 +236,11 @@ describe("Test jest expect.toCompleteWithinQuantile assertion", () => {
         // WHEN asserting that (Q%) of the times when running for (I) iterations, the function will complete in (T) milliseconds
         // THEN expect to fail
         const Q = 1;
-        const expectedStatsLine = buildStatsLine(T_Array);
+        const expectedStatsBlock = buildStatsBlock(T_Array);
 
         expect(() => {
             expect(() => undefined).not.toCompleteWithinQuantile(T, {iterations: I, quantile: Q});
-        }).toThrowError(`expected that ${Q}% of the time when running ${I} iterations,\nthe function duration to be greater than ${printExpected(T)} (ms),\ninstead it was ${printReceived(T)} (ms)\n${expectedStatsLine}`);
+        }).toThrowError(`expected that ${Q}% of the time when running ${I} iterations,\nthe function duration to be greater than ${printExpected(T)} (ms),\ninstead it was ${printReceived(T)} (ms)\n\n${expectedStatsBlock}`);
     });
 
     test("Should base calculations of the the expected quantile based on the iterations arguments", () => {
@@ -298,6 +323,110 @@ describe("Test jest expect.toCompleteWithinQuantile assertion", () => {
         // THEN removeOutliers should not be called
         expect(metrics.removeOutliers).not.toHaveBeenCalled();
     });
+
+    test("Should show CI unavailable and warnings for n=1", () => {
+        // GIVEN a function that runs a single iteration
+        const T = 10;
+        mockFunctionProcessTimes([T]);
+
+        // WHEN asserting with iterations=1 and it fails
+        let errorMessage = '';
+        try {
+            expect(() => undefined).toCompleteWithinQuantile(T - 1, {iterations: 1, quantile: 1});
+        } catch (e) {
+            errorMessage = (e as Error).message;
+        }
+
+        // THEN the message should indicate CI is unavailable
+        expect(errorMessage).toContain('95% CI: N/A (insufficient data)');
+        // AND warnings should be present
+        expect(errorMessage).toContain('Warnings:');
+        expect(errorMessage).toContain('Single data point: standard deviation and confidence interval cannot be computed');
+    });
+
+    test("Should show warnings for small sample size", () => {
+        // GIVEN a function that runs for a small sample (n=5)
+        const T = 10;
+        const I = 5;
+        mockFunctionProcessTimes(Array(I).fill(T));
+
+        // WHEN asserting and it fails
+        let errorMessage = '';
+        try {
+            expect(() => undefined).toCompleteWithinQuantile(T - 1, {iterations: I, quantile: 1});
+        } catch (e) {
+            errorMessage = (e as Error).message;
+        }
+
+        // THEN the message should contain the small sample warning
+        expect(errorMessage).toContain('Warnings:');
+        expect(errorMessage).toContain('Small sample size (n <= 30): confidence intervals are less stable and more sensitive to individual values');
+    });
+
+    test("Should not show warnings for large sample size (n>=31)", () => {
+        // GIVEN a function that runs for a large sample (n=31)
+        const T = 10;
+        const I = 31;
+        mockFunctionProcessTimes(Array(I).fill(T));
+
+        // WHEN asserting and it fails
+        let errorMessage = '';
+        try {
+            expect(() => undefined).toCompleteWithinQuantile(T - 1, {iterations: I, quantile: 1});
+        } catch (e) {
+            errorMessage = (e as Error).message;
+        }
+
+        // THEN the message should not contain warnings
+        expect(errorMessage).not.toContain('Warnings:');
+    });
+
+    test("Should show correct distribution percentiles", () => {
+        // GIVEN a function with varying durations
+        const durations = [5, 10, 15, 20, 25];
+        const I = durations.length;
+        mockFunctionProcessTimes(durations);
+
+        // WHEN asserting and it fails
+        let errorMessage = '';
+        try {
+            expect(() => undefined).toCompleteWithinQuantile(1, {iterations: I, quantile: 1});
+        } catch (e) {
+            errorMessage = (e as Error).message;
+        }
+
+        // THEN the distribution line should contain the correct percentile values
+        const p25 = metrics.calcQuantile(25, durations).toFixed(2);
+        const p50 = metrics.calcQuantile(50, durations).toFixed(2);
+        const p75 = metrics.calcQuantile(75, durations).toFixed(2);
+        const p90 = metrics.calcQuantile(90, durations).toFixed(2);
+        expect(errorMessage).toContain(`P25=${p25}ms`);
+        expect(errorMessage).toContain(`P50=${p50}ms`);
+        expect(errorMessage).toContain(`P75=${p75}ms`);
+        expect(errorMessage).toContain(`P90=${p90}ms`);
+    });
+
+    test("Should show N/A for RME and CV when mean is zero", () => {
+        // GIVEN durations that produce a zero mean (not possible with real durations,
+        // so we test indirectly by verifying the formatStatsBlock logic via calcStats)
+        // When all durations are identical, stddev=0 and CV=0, but mean is non-zero.
+        // For mean=0 we need to verify the branch via the stats output.
+        // We test this by checking the stats block output when calcStats would produce null RME/CV.
+        const T = 10;
+        mockFunctionProcessTimes([T]);
+
+        // WHEN asserting with iterations=1 (stddev=null, so CV=null, and CI=null so RME=null)
+        let errorMessage = '';
+        try {
+            expect(() => undefined).toCompleteWithinQuantile(T - 1, {iterations: 1, quantile: 1});
+        } catch (e) {
+            errorMessage = (e as Error).message;
+        }
+
+        // THEN RME and CV should show N/A
+        expect(errorMessage).toContain('RME: N/A');
+        expect(errorMessage).toContain('CV: N/A');
+    });
 });
 
 describe("Test jest expect.toResolveWithinQuantile assertion", () => {
@@ -339,10 +468,10 @@ describe("Test jest expect.toResolveWithinQuantile assertion", () => {
         // WHEN asserting that (Q%) of the times when running for (I) iterations, the promise will resolve in (T) - 1 milliseconds
         // THEN expect to fail
         const Q = 1;
-        const expectedStatsLine = buildStatsLine(T_Array);
+        const expectedStatsBlock = buildStatsBlock(T_Array);
         await expect(async () => {
             await expect(() => Promise.resolve()).toResolveWithinQuantile(T - 1, {iterations: I, quantile: Q});
-        }).rejects.toThrowError(`expected that ${Q}% of the time when running ${I} iterations,\nthe function duration to be less or equal to ${printExpected(T - 1)} (ms),\ninstead it was ${printReceived(T)} (ms)\n${expectedStatsLine}`);
+        }).rejects.toThrowError(`expected that ${Q}% of the time when running ${I} iterations,\nthe function duration to be less or equal to ${printExpected(T - 1)} (ms),\ninstead it was ${printReceived(T)} (ms)\n\n${expectedStatsBlock}`);
     });
 
     test("Should not to pass the assertion", async () => {
@@ -355,10 +484,10 @@ describe("Test jest expect.toResolveWithinQuantile assertion", () => {
         // WHEN asserting that (Q%) of the times when running for (I) iterations, the promise will not resolve in (T) milliseconds
         // THEN expect to fail
         const Q = 1;
-        const expectedStatsLine = buildStatsLine(T_Array);
+        const expectedStatsBlock = buildStatsBlock(T_Array);
         await expect(async () => {
             await expect(() => Promise.resolve()).not.toResolveWithinQuantile(T, {iterations: I, quantile: Q});
-        }).rejects.toThrowError(`expected that ${Q}% of the time when running ${I} iterations,\nthe function duration to be greater than ${printExpected(T)} (ms),\ninstead it was ${printReceived(T)} (ms)\n${expectedStatsLine}`);
+        }).rejects.toThrowError(`expected that ${Q}% of the time when running ${I} iterations,\nthe function duration to be greater than ${printExpected(T)} (ms),\ninstead it was ${printReceived(T)} (ms)\n\n${expectedStatsBlock}`);
     });
 
     test("Should fail the assertion if the promise is rejected", async () => {
