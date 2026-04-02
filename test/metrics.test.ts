@@ -1,4 +1,4 @@
-import {calcQuantile, calcStats} from "../src/metrics";
+import {calcQuantile, calcStats, removeOutliers} from "../src/metrics";
 
 describe("Test calcQuantile function", () => {
     test.each([
@@ -45,6 +45,44 @@ describe("Test calcQuantile function", () => {
     ])("should throw an error when value is %s", (description, q) => {
         // @ts-expect-error - intentionally passing invalid quantile for testing
         expect(() => calcQuantile(q, [])).toThrowError(/Quantile must be an integer greater than 0 and less than or equal to 100/);
+    });
+});
+
+describe("Test removeOutliers function", () => {
+    test("should remove outliers from a dataset with extreme values", () => {
+        const data = [10, 11, 12, 10, 11, 100];
+        const result = removeOutliers(data);
+        expect(result).toEqual([10, 11, 12, 10, 11]);
+    });
+
+    test("should return a copy when no outliers exist", () => {
+        const data = [10, 11, 12, 13, 14];
+        const result = removeOutliers(data);
+        expect(result).toEqual([10, 11, 12, 13, 14]);
+    });
+
+    test("should return a copy for datasets with fewer than 4 elements", () => {
+        const data = [1, 2, 100];
+        const result = removeOutliers(data);
+        expect(result).toEqual([1, 2, 100]);
+    });
+
+    test("should not mutate the input array", () => {
+        const data = [10, 11, 12, 10, 11, 100];
+        removeOutliers(data);
+        expect(data).toEqual([10, 11, 12, 10, 11, 100]);
+    });
+
+    test("should remove both low and high outliers", () => {
+        const data = [-100, 10, 11, 12, 13, 14, 200];
+        const result = removeOutliers(data);
+        expect(result).toEqual([10, 11, 12, 13, 14]);
+    });
+
+    test("should handle identical values", () => {
+        const data = [5, 5, 5, 5, 5];
+        const result = removeOutliers(data);
+        expect(result).toEqual([5, 5, 5, 5, 5]);
     });
 });
 
