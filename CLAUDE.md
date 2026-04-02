@@ -3,6 +3,12 @@
 ## Project overview
 
 TypeScript library providing Jest matchers for performance testing (e.g., `toCompleteWithin`, `toResolveWithin`, quantile-based matchers). Zero production dependencies — all math/statistics implemented in-house. Volta-pinned Node 18, TypeScript ~4.7, Jest ~27.
+## Creating and Managing issues
+Use the `/writing-issues-in-github` skill to create issue for work that should be planned in the future. This includes bugs, features, refactors, and any other work that should be tracked in GitHub.
+
+When creating a PR for an issue, make sure to link the PR to the issue by including "Closes #issue_number" in the PR description. This will automatically close the issue when the PR is merged.
+
+Make sure you reference the issue in the commit message as well, by including "Ref: #issue_number" in the commit message footer. 
 
 ## Common commands
 
@@ -39,7 +45,7 @@ TypeScript library providing Jest matchers for performance testing (e.g., `toCom
 
 ## Unit test skill
 
-- Use the `/writting-unit-tests` skill when writing or reviewing unit tests
+- Use the `/writing-unit-tests` skill when writing or reviewing unit tests
 - Tests live in `test/` directory, named `*.test.ts`
 
 ## Project structure
