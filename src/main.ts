@@ -1,6 +1,6 @@
 import {expect} from '@jest/globals';
 import {printReceived, printExpected} from 'jest-matcher-utils';
-import {calcQuantile, calcStats} from "./metrics";
+import {calcQuantile, calcStats, removeOutliers} from "./metrics";
 
 const nowInMillis = () => {
     const hrTime = process.hrtime();
@@ -19,7 +19,7 @@ function validateDuration(expectedDurationInMilliseconds: number): void {
     }
 }
 
-function validateQuantileOptions(options: { iterations: number, quantile: number, warmup?: number }): void {
+function validateQuantileOptions(options: { iterations: number, quantile: number, warmup?: number, outliers?: 'remove' | 'keep' }): void {
     if (!options || typeof options !== 'object') {
         throw new Error('jest-performance-matchers: options must be an object with iterations and quantile');
     }
@@ -31,6 +31,9 @@ function validateQuantileOptions(options: { iterations: number, quantile: number
     }
     if (options.warmup !== undefined && (!Number.isInteger(options.warmup) || options.warmup < 0)) {
         throw new Error(`jest-performance-matchers: warmup must be a non-negative integer, received ${options.warmup}`);
+    }
+    if (options.outliers !== undefined && options.outliers !== 'remove' && options.outliers !== 'keep') {
+        throw new Error(`jest-performance-matchers: outliers must be 'remove' or 'keep', received '${options.outliers}'`);
     }
 }
 
@@ -60,7 +63,8 @@ function toCompleteWithin(callback: () => unknown, expectedDurationInMillisecond
 function toCompleteWithinQuantile(callback: () => unknown, expectedDurationInMilliseconds: number, options: {
     iterations: number,
     quantile: number,
-    warmup?: number
+    warmup?: number,
+    outliers?: 'remove' | 'keep'
 }) {
     validateCallback(callback);
     validateDuration(expectedDurationInMilliseconds);
@@ -81,8 +85,9 @@ function toCompleteWithinQuantile(callback: () => unknown, expectedDurationInMil
         const t1 = nowInMillis();
         durations.push(t1 - t0);
     }
-    const quantileValue = calcQuantile(quantile, durations);
-    return assertDurationQuantile(count, quantile, quantileValue, durations, expectedDurationInMilliseconds);
+    const effectiveDurations = options.outliers === 'remove' ? removeOutliers(durations) : durations;
+    const quantileValue = calcQuantile(quantile, effectiveDurations);
+    return assertDurationQuantile(count, quantile, quantileValue, effectiveDurations, expectedDurationInMilliseconds);
 }
 
 /**
@@ -110,7 +115,8 @@ async function toResolveWithin(promise: () => Promise<unknown>, expectedDuration
 async function toResolveWithinQuantile(promise: () => Promise<unknown>, expectedDurationInMilliseconds: number, options: {
     iterations: number,
     quantile: number,
-    warmup?: number
+    warmup?: number,
+    outliers?: 'remove' | 'keep'
 }) {
     validateCallback(promise);
     validateDuration(expectedDurationInMilliseconds);
@@ -131,8 +137,9 @@ async function toResolveWithinQuantile(promise: () => Promise<unknown>, expected
         const t1 = nowInMillis();
         durations.push(t1 - t0);
     }
-    const quantileValue = calcQuantile(quantile, durations);
-    return assertDurationQuantile(count, quantile, quantileValue, durations, expectedDurationInMilliseconds);
+    const effectiveDurations = options.outliers === 'remove' ? removeOutliers(durations) : durations;
+    const quantileValue = calcQuantile(quantile, effectiveDurations);
+    return assertDurationQuantile(count, quantile, quantileValue, effectiveDurations, expectedDurationInMilliseconds);
 }
 
 function formatDuration(value: number): string {
@@ -193,7 +200,8 @@ declare global {
             toCompleteWithinQuantile(expectedDurationInMilliseconds: number, options: {
                 iterations: number,
                 quantile: number,
-                warmup?: number
+                warmup?: number,
+                outliers?: 'remove' | 'keep'
             }): R;
 
             toResolveWithin(expectedDurationInMilliseconds: number): Promise<R>;
@@ -201,7 +209,8 @@ declare global {
             toResolveWithinQuantile(expectedDurationInMilliseconds: number, options: {
                 iterations: number,
                 quantile: number,
-                warmup?: number
+                warmup?: number,
+                outliers?: 'remove' | 'keep'
             }): Promise<R>;
         }
     }

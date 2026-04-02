@@ -252,6 +252,36 @@ describe("Test jest expect.toCompleteWithinQuantile assertion", () => {
         // THEN only measured iterations are passed to calcQuantile
         expect(metrics.calcQuantile).toHaveBeenCalledWith(1, T_Array);
     });
+
+    test("Should remove outliers when outliers option is 'remove'", () => {
+        // GIVEN a function with some outlier durations
+        const I = 6;
+        const durations = [10, 11, 12, 10, 11, 100];
+        mockFunctionProcessTimes(durations);
+        const mockFn = jest.fn();
+
+        // WHEN asserting with outliers: 'remove'
+        jest.spyOn(metrics, 'removeOutliers');
+        expect(mockFn).toCompleteWithinQuantile(15, {iterations: I, quantile: 95, outliers: 'remove'});
+
+        // THEN removeOutliers should be called with the durations
+        expect(metrics.removeOutliers).toHaveBeenCalledWith(durations);
+    });
+
+    test("Should keep outliers by default", () => {
+        // GIVEN a function with some outlier durations
+        const I = 5;
+        const T_Array = Array(I).fill(10);
+        mockFunctionProcessTimes(T_Array);
+        const mockFn = jest.fn();
+
+        // WHEN asserting without outliers option
+        jest.spyOn(metrics, 'removeOutliers');
+        expect(mockFn).toCompleteWithinQuantile(15, {iterations: I, quantile: 95});
+
+        // THEN removeOutliers should not be called
+        expect(metrics.removeOutliers).not.toHaveBeenCalled();
+    });
 });
 
 describe("Test jest expect.toResolveWithinQuantile assertion", () => {
@@ -382,6 +412,36 @@ describe("Test jest expect.toResolveWithinQuantile assertion", () => {
 
         // THEN only measured iterations are passed to calcQuantile
         expect(metrics.calcQuantile).toHaveBeenCalledWith(1, T_Array);
+    });
+
+    test("Should remove outliers when outliers option is 'remove'", async () => {
+        // GIVEN a promise with some outlier durations
+        const I = 6;
+        const durations = [10, 11, 12, 10, 11, 100];
+        mockFunctionProcessTimes(durations);
+        const mockFn = jest.fn(() => Promise.resolve());
+
+        // WHEN asserting with outliers: 'remove'
+        jest.spyOn(metrics, 'removeOutliers');
+        await expect(mockFn).toResolveWithinQuantile(15, {iterations: I, quantile: 95, outliers: 'remove'});
+
+        // THEN removeOutliers should be called with the durations
+        expect(metrics.removeOutliers).toHaveBeenCalledWith(durations);
+    });
+
+    test("Should keep outliers by default", async () => {
+        // GIVEN a promise with durations
+        const I = 5;
+        const T_Array = Array(I).fill(10);
+        mockFunctionProcessTimes(T_Array);
+        const mockFn = jest.fn(() => Promise.resolve());
+
+        // WHEN asserting without outliers option
+        jest.spyOn(metrics, 'removeOutliers');
+        await expect(mockFn).toResolveWithinQuantile(15, {iterations: I, quantile: 95});
+
+        // THEN removeOutliers should not be called
+        expect(metrics.removeOutliers).not.toHaveBeenCalled();
     });
 });
 
@@ -540,6 +600,15 @@ describe("Input validation", () => {
             expect(() => {
                 expect(() => undefined).toCompleteWithinQuantile(10, {iterations: 5, quantile: 95, warmup: 1.5});
             }).toThrowError("jest-performance-matchers: warmup must be a non-negative integer, received 1.5");
+        });
+
+        test("should throw when outliers option is invalid", () => {
+            // GIVEN invalid outliers option
+            // WHEN asserting toCompleteWithinQuantile
+            // THEN expect a descriptive error
+            expect(() => {
+                expect(() => undefined).toCompleteWithinQuantile(10, {iterations: 5, quantile: 95, outliers: 'invalid' as 'remove' | 'keep'});
+            }).toThrowError("jest-performance-matchers: outliers must be 'remove' or 'keep', received 'invalid'");
         });
     });
 

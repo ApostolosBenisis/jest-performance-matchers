@@ -1,3 +1,21 @@
+/**
+ * Remove statistical outliers using the IQR (Interquartile Range) method.
+ * Values outside [Q1 - 1.5*IQR, Q3 + 1.5*IQR] are considered outliers and excluded.
+ * This is the standard Tukey's fences approach used in box-plot analysis.
+ * Returns a new array with outliers removed. Does not mutate the input.
+ * For datasets with fewer than 4 elements, returns a copy unchanged (IQR is unreliable).
+ */
+export function removeOutliers(data: number[]): number[] {
+    if (data.length < 4) return [...data];
+    const sorted = [...data].sort((a, b) => a - b);
+    const q1 = calcQuantileOnSorted(0.25, sorted);
+    const q3 = calcQuantileOnSorted(0.75, sorted);
+    const iqr = q3 - q1;
+    const lowerBound = q1 - 1.5 * iqr;
+    const upperBound = q3 + 1.5 * iqr;
+    return data.filter(v => v >= lowerBound && v <= upperBound);
+}
+
 export function calcQuantile(q: number, data: number[]): number {
     if (!Number.isInteger(q) || q <= 0 || q > 100) throw new Error("Quantile must be an integer greater than 0 and less than or equal to 100");
     if (!data || !Array.isArray(data) || data.length === 0 || data.some(isNaN)) throw new Error("Data must be an array of numbers and must contain at least one element");
