@@ -9,7 +9,8 @@ function mockFunctionProcessTime(milliseconds: number) {
 
 function buildStatsLine(durations: number[]): string {
     const stats = metrics.calcStats(durations);
-    return `Statistics: min=${stats.min.toFixed(2)}, max=${stats.max.toFixed(2)}, mean=${stats.mean.toFixed(2)}, median=${stats.median.toFixed(2)}, stddev=${stats.stddev.toFixed(2)}`;
+    const fmt = (v: number | null) => v !== null ? v.toFixed(2) : 'N/A';
+    return `Statistics: min=${fmt(stats.min)}, max=${fmt(stats.max)}, mean=${fmt(stats.mean)}, median=${fmt(stats.median)}, stddev=${fmt(stats.stddev)}`;
 }
 
 function mockFunctionProcessTimes(milliseconds: number[]) {
@@ -183,6 +184,21 @@ describe("Test jest expect.toCompleteWithinQuantile assertion", () => {
         expect(() => {
             expect(() => undefined).toCompleteWithinQuantile(T - 1, {iterations: I, quantile: Q});
         }).toThrowError(`expected that ${Q}% of the time when running ${I} iterations,\nthe function duration to be less or equal to ${printExpected(T - 1)} (ms),\ninstead it was ${printReceived(T)} (ms)\n${expectedStatsLine}`);
+    });
+
+    test("Should show N/A for stddev when only one iteration is run", () => {
+        // GIVEN a function takes (T) milliseconds for a single iteration
+        const T = 10;
+        mockFunctionProcessTimes([T]);
+
+        // WHEN asserting with iterations=1 and it fails
+        // THEN the stats line should show N/A for stddev (n=1 cannot compute stddev)
+        const expectedStatsLine = buildStatsLine([T]);
+        expect(expectedStatsLine).toContain("stddev=N/A");
+
+        expect(() => {
+            expect(() => undefined).toCompleteWithinQuantile(T - 1, {iterations: 1, quantile: 1});
+        }).toThrowError(expectedStatsLine);
     });
 
     test("Should not to pass the assertion", () => {
