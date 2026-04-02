@@ -9,7 +9,7 @@ const nowInMillis = () => {
 
 function validateCallback(callback: unknown): void {
     if (typeof callback !== 'function') {
-        throw new Error(`jest-performance-matchers: expected value must be a function, received ${typeof callback}`);
+        throw new TypeError(`jest-performance-matchers: expected value must be a function, received ${typeof callback}`);
     }
 }
 
@@ -142,13 +142,13 @@ async function toResolveWithinQuantile(promise: () => Promise<unknown>, expected
     return assertDurationQuantile(count, quantile, quantileValue, effectiveDurations, expectedDurationInMilliseconds);
 }
 
-function formatDuration(value: number): string {
-    return value.toFixed(2);
+function formatStatValue(value: number | null): string {
+    return value === null ? 'N/A' : value.toFixed(2);
 }
 
 function assertDurationQuantile(iterations: number, quantile: number,  quantileValue: number, durations: number[], expectedDurationInMilliseconds: number) {
     const stats = calcStats(durations);
-    const statsLine = `Statistics: min=${formatDuration(stats.min)}, max=${formatDuration(stats.max)}, mean=${formatDuration(stats.mean)}, median=${formatDuration(stats.median)}, stddev=${formatDuration(stats.stddev)}`;
+    const statsLine = `Statistics: min=${formatStatValue(stats.min)}, max=${formatStatValue(stats.max)}, mean=${formatStatValue(stats.mean)}, median=${formatStatValue(stats.median)}, stddev=${formatStatValue(stats.stddev)}`;
 
     if (quantileValue <= expectedDurationInMilliseconds) {
         return {

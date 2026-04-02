@@ -87,61 +87,108 @@ describe("Test removeOutliers function", () => {
 });
 
 describe("Test calcStats function", () => {
-    test("should calculate stats for a simple dataset", () => {
+    test("should calculate stats for a simple dataset (n=5, t-based)", () => {
         const stats = calcStats([1, 2, 3, 4, 5]);
+        expect(stats.n).toBe(5);
         expect(stats.min).toBe(1);
         expect(stats.max).toBe(5);
         expect(stats.mean).toBe(3);
         expect(stats.median).toBe(3);
-        expect(stats.stddev).toBeCloseTo(Math.sqrt(2), 10);
+        // Bessel's correction: variance = 10/4 = 2.5, stddev = sqrt(2.5)
+        expect(stats.stddev).toBeCloseTo(Math.sqrt(2.5), 10);
+        expect(stats.isSmallSample).toBe(true);
+        expect(stats.confidenceMethod).toBe("t");
+        expect(stats.confidenceCriticalValue).toBe(2.776);
     });
 
-    test("should calculate margin of error for a dataset", () => {
+    test("should calculate margin of error using t-distribution for small samples", () => {
         const data = [1, 2, 3, 4, 5];
         const stats = calcStats(data);
-        // marginOfError = 1.96 * stddev / sqrt(n)
-        const expectedMoE = 1.96 * Math.sqrt(2) / Math.sqrt(5);
+        // t-based: MoE = t(df=4) * stddev / sqrt(n) = 2.776 * sqrt(2.5) / sqrt(5)
+        const expectedMoE = 2.776 * Math.sqrt(2.5) / Math.sqrt(5);
         expect(stats.marginOfError).toBeCloseTo(expectedMoE, 10);
     });
 
     test("should calculate relative margin of error as a percentage", () => {
         const data = [1, 2, 3, 4, 5];
         const stats = calcStats(data);
-        const expectedMoE = 1.96 * Math.sqrt(2) / Math.sqrt(5);
+        const expectedMoE = 2.776 * Math.sqrt(2.5) / Math.sqrt(5);
         const expectedRME = (expectedMoE / 3) * 100;
         expect(stats.relativeMarginOfError).toBeCloseTo(expectedRME, 10);
     });
 
-    test("should calculate 95% confidence interval", () => {
+    test("should calculate 95% confidence interval using t-distribution", () => {
         const data = [1, 2, 3, 4, 5];
         const stats = calcStats(data);
-        const expectedMoE = 1.96 * Math.sqrt(2) / Math.sqrt(5);
-        expect(stats.confidenceInterval[0]).toBeCloseTo(3 - expectedMoE, 10);
-        expect(stats.confidenceInterval[1]).toBeCloseTo(3 + expectedMoE, 10);
+        const expectedMoE = 2.776 * Math.sqrt(2.5) / Math.sqrt(5);
+        expect(stats.confidenceInterval![0]).toBeCloseTo(3 - expectedMoE, 10);
+        expect(stats.confidenceInterval![1]).toBeCloseTo(3 + expectedMoE, 10);
     });
 
-    test("should calculate coefficient of variation", () => {
+    test("should calculate coefficient of variation with sample stddev", () => {
         const data = [1, 2, 3, 4, 5];
         const stats = calcStats(data);
-        // coefficientOfVariation = stddev / |mean|
-        expect(stats.coefficientOfVariation).toBeCloseTo(Math.sqrt(2) / 3, 10);
+        // coefficientOfVariation = stddev / |mean| = sqrt(2.5) / 3
+        expect(stats.coefficientOfVariation).toBeCloseTo(Math.sqrt(2.5) / 3, 10);
     });
 
-    test("should calculate stats for a single value", () => {
+    test("should return nulls for empty dataset (n=0)", () => {
+        const stats = calcStats([]);
+        expect(stats.n).toBe(0);
+        expect(stats.min).toBeNull();
+        expect(stats.max).toBeNull();
+        expect(stats.mean).toBeNull();
+        expect(stats.median).toBeNull();
+        expect(stats.stddev).toBeNull();
+        expect(stats.marginOfError).toBeNull();
+        expect(stats.relativeMarginOfError).toBeNull();
+        expect(stats.confidenceInterval).toBeNull();
+        expect(stats.coefficientOfVariation).toBeNull();
+        expect(stats.isSmallSample).toBe(true);
+        expect(stats.confidenceMethod).toBeNull();
+        expect(stats.confidenceCriticalValue).toBeNull();
+        expect(stats.warnings).toContain("Empty dataset: no statistics can be computed");
+    });
+
+    test("should return null stddev and CI for a single value (n=1)", () => {
         const stats = calcStats([42]);
+        expect(stats.n).toBe(1);
         expect(stats.min).toBe(42);
         expect(stats.max).toBe(42);
         expect(stats.mean).toBe(42);
         expect(stats.median).toBe(42);
-        expect(stats.stddev).toBe(0);
-        expect(stats.marginOfError).toBe(0);
-        expect(stats.relativeMarginOfError).toBe(0);
-        expect(stats.confidenceInterval).toEqual([42, 42]);
-        expect(stats.coefficientOfVariation).toBe(0);
+        expect(stats.stddev).toBeNull();
+        expect(stats.marginOfError).toBeNull();
+        expect(stats.relativeMarginOfError).toBeNull();
+        expect(stats.confidenceInterval).toBeNull();
+        expect(stats.coefficientOfVariation).toBeNull();
+        expect(stats.isSmallSample).toBe(true);
+        expect(stats.confidenceMethod).toBeNull();
+        expect(stats.confidenceCriticalValue).toBeNull();
+        expect(stats.warnings).toContain("Single data point: standard deviation and confidence interval cannot be computed");
+        expect(stats.warnings).toContain("Small sample size (n <= 30): confidence intervals are less stable and more sensitive to individual values");
+    });
+
+    test("should use t-distribution with df=1 for n=2", () => {
+        const stats = calcStats([10, 20]);
+        expect(stats.n).toBe(2);
+        expect(stats.min).toBe(10);
+        expect(stats.max).toBe(20);
+        expect(stats.mean).toBe(15);
+        expect(stats.isSmallSample).toBe(true);
+        expect(stats.confidenceMethod).toBe("t");
+        expect(stats.confidenceCriticalValue).toBe(12.706);
+        // variance = (25 + 25) / 1 = 50, stddev = sqrt(50)
+        expect(stats.stddev).toBeCloseTo(Math.sqrt(50), 10);
+        const expectedMoE = 12.706 * Math.sqrt(50) / Math.sqrt(2);
+        expect(stats.marginOfError).toBeCloseTo(expectedMoE, 10);
+        expect(stats.confidenceInterval![0]).toBeCloseTo(15 - expectedMoE, 10);
+        expect(stats.confidenceInterval![1]).toBeCloseTo(15 + expectedMoE, 10);
     });
 
     test("should calculate stats for identical values", () => {
         const stats = calcStats([10, 10, 10]);
+        expect(stats.n).toBe(3);
         expect(stats.min).toBe(10);
         expect(stats.max).toBe(10);
         expect(stats.mean).toBe(10);
@@ -151,14 +198,61 @@ describe("Test calcStats function", () => {
         expect(stats.relativeMarginOfError).toBe(0);
         expect(stats.confidenceInterval).toEqual([10, 10]);
         expect(stats.coefficientOfVariation).toBe(0);
+        expect(stats.confidenceMethod).toBe("t");
     });
 
-    test("should handle dataset with zero mean", () => {
+    test("should return null for RME and CV when mean is zero", () => {
         const data = [-2, -1, 0, 1, 2];
         const stats = calcStats(data);
         expect(stats.mean).toBe(0);
-        expect(stats.relativeMarginOfError).toBe(0);
-        expect(stats.coefficientOfVariation).toBe(0);
+        expect(stats.relativeMarginOfError).toBeNull();
+        expect(stats.coefficientOfVariation).toBeNull();
+        // Bessel's: variance = 10/4 = 2.5, stddev = sqrt(2.5)
+        expect(stats.stddev).toBeCloseTo(Math.sqrt(2.5), 10);
+        // marginOfError and CI should still be computed
+        expect(stats.marginOfError).not.toBeNull();
+        expect(stats.confidenceInterval).not.toBeNull();
+    });
+
+    test("should use t-distribution at n=29 boundary", () => {
+        const data = Array.from({length: 29}, (_, i) => i + 1);
+        const stats = calcStats(data);
+        expect(stats.n).toBe(29);
+        expect(stats.isSmallSample).toBe(true);
+        expect(stats.confidenceMethod).toBe("t");
+        expect(stats.confidenceCriticalValue).toBe(2.048);
+    });
+
+    test("should use t-distribution at n=30 boundary and mark as small sample", () => {
+        const data = Array.from({length: 30}, (_, i) => i + 1);
+        const stats = calcStats(data);
+        expect(stats.n).toBe(30);
+        expect(stats.isSmallSample).toBe(true);
+        expect(stats.confidenceMethod).toBe("t");
+        expect(stats.confidenceCriticalValue).toBe(2.045);
+        expect(stats.warnings).toContain("Small sample size (n <= 30): confidence intervals are less stable and more sensitive to individual values");
+    });
+
+    test("should use z-distribution at n=31 boundary and not mark as small sample", () => {
+        const data = Array.from({length: 31}, (_, i) => i + 1);
+        const stats = calcStats(data);
+        expect(stats.n).toBe(31);
+        expect(stats.isSmallSample).toBe(false);
+        expect(stats.confidenceMethod).toBe("z");
+        expect(stats.confidenceCriticalValue).toBe(1.96);
+        expect(stats.warnings).toEqual([]);
+    });
+
+    test("should include small sample warning for n <= 30", () => {
+        const data = [1, 2, 3, 4, 5];
+        const stats = calcStats(data);
+        expect(stats.warnings).toContain("Small sample size (n <= 30): confidence intervals are less stable and more sensitive to individual values");
+    });
+
+    test("should not include small sample warning for n > 30", () => {
+        const data = Array.from({length: 31}, (_, i) => i + 1);
+        const stats = calcStats(data);
+        expect(stats.warnings).toEqual([]);
     });
 
     test("should not mutate the input array", () => {
