@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-04-02
+
+### Added
+- IQR-based outlier detection for quantile matchers with `{ outliers: 'remove' | 'keep' }` option.
+- Confidence intervals (95% CI), relative margin of error (RME%), and coefficient of variation (CV) to `calcStats()` output.
+- `removeOutliers()` utility function in `src/metrics.ts`.
+- `Stats` interface fields: `n`, `marginOfError`, `relativeMarginOfError`, `confidenceInterval`, `coefficientOfVariation`, `isSmallSample`, `confidenceMethod`, `confidenceCriticalValue`, `warnings`.
+
+### Changed
+- Quantile matcher failure messages now show rich multi-line diagnostics: summary stats, 95% CI, RME, CV, distribution percentiles (P25/P50/P75/P90), and contextual warnings.
+- Standard deviation uses sample stddev with Bessel's correction (divides by n-1) instead of population stddev.
+- Confidence intervals use Student's t-distribution for small samples (n <= 30), z-distribution for n >= 31.
+
 ## [1.1.0] - 2026-04-01
 
 ### Added
