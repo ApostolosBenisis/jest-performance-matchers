@@ -96,6 +96,37 @@ describe("Test calcStats function", () => {
         expect(stats.stddev).toBeCloseTo(Math.sqrt(2), 10);
     });
 
+    test("should calculate margin of error for a dataset", () => {
+        const data = [1, 2, 3, 4, 5];
+        const stats = calcStats(data);
+        // marginOfError = 1.96 * stddev / sqrt(n)
+        const expectedMoE = 1.96 * Math.sqrt(2) / Math.sqrt(5);
+        expect(stats.marginOfError).toBeCloseTo(expectedMoE, 10);
+    });
+
+    test("should calculate relative margin of error as a percentage", () => {
+        const data = [1, 2, 3, 4, 5];
+        const stats = calcStats(data);
+        const expectedMoE = 1.96 * Math.sqrt(2) / Math.sqrt(5);
+        const expectedRME = (expectedMoE / 3) * 100;
+        expect(stats.relativeMarginOfError).toBeCloseTo(expectedRME, 10);
+    });
+
+    test("should calculate 95% confidence interval", () => {
+        const data = [1, 2, 3, 4, 5];
+        const stats = calcStats(data);
+        const expectedMoE = 1.96 * Math.sqrt(2) / Math.sqrt(5);
+        expect(stats.confidenceInterval[0]).toBeCloseTo(3 - expectedMoE, 10);
+        expect(stats.confidenceInterval[1]).toBeCloseTo(3 + expectedMoE, 10);
+    });
+
+    test("should calculate coefficient of variation", () => {
+        const data = [1, 2, 3, 4, 5];
+        const stats = calcStats(data);
+        // coefficientOfVariation = stddev / |mean|
+        expect(stats.coefficientOfVariation).toBeCloseTo(Math.sqrt(2) / 3, 10);
+    });
+
     test("should calculate stats for a single value", () => {
         const stats = calcStats([42]);
         expect(stats.min).toBe(42);
@@ -103,6 +134,10 @@ describe("Test calcStats function", () => {
         expect(stats.mean).toBe(42);
         expect(stats.median).toBe(42);
         expect(stats.stddev).toBe(0);
+        expect(stats.marginOfError).toBe(0);
+        expect(stats.relativeMarginOfError).toBe(0);
+        expect(stats.confidenceInterval).toEqual([42, 42]);
+        expect(stats.coefficientOfVariation).toBe(0);
     });
 
     test("should calculate stats for identical values", () => {
@@ -112,6 +147,18 @@ describe("Test calcStats function", () => {
         expect(stats.mean).toBe(10);
         expect(stats.median).toBe(10);
         expect(stats.stddev).toBe(0);
+        expect(stats.marginOfError).toBe(0);
+        expect(stats.relativeMarginOfError).toBe(0);
+        expect(stats.confidenceInterval).toEqual([10, 10]);
+        expect(stats.coefficientOfVariation).toBe(0);
+    });
+
+    test("should handle dataset with zero mean", () => {
+        const data = [-2, -1, 0, 1, 2];
+        const stats = calcStats(data);
+        expect(stats.mean).toBe(0);
+        expect(stats.relativeMarginOfError).toBe(0);
+        expect(stats.coefficientOfVariation).toBe(0);
     });
 
     test("should not mutate the input array", () => {

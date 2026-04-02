@@ -40,15 +40,33 @@ export interface Stats {
     mean: number;
     median: number;
     stddev: number;
+    /** Margin of error for a 95% confidence interval (z=1.96 * stddev / sqrt(n)) */
+    marginOfError: number;
+    /** Relative margin of error as a percentage (marginOfError / mean * 100) */
+    relativeMarginOfError: number;
+    /** 95% confidence interval [lower, upper] for the mean */
+    confidenceInterval: [number, number];
+    /** Coefficient of variation (stddev / mean), measures relative dispersion */
+    coefficientOfVariation: number;
 }
 
+/**
+ * Calculate summary statistics for a dataset.
+ * Uses population standard deviation (divides by n).
+ * Confidence intervals use z=1.96 (95% CI, normal approximation).
+ */
 export function calcStats(data: number[]): Stats {
     const sorted = [...data].sort((a, b) => a - b);
+    const n = data.length;
     const min = sorted[0];
     const max = sorted[sorted.length - 1];
-    const mean = data.reduce((sum, v) => sum + v, 0) / data.length;
+    const mean = data.reduce((sum, v) => sum + v, 0) / n;
     const median = calcQuantileOnSorted(0.5, sorted);
-    const variance = data.reduce((sum, v) => sum + (v - mean) ** 2, 0) / data.length;
+    const variance = data.reduce((sum, v) => sum + (v - mean) ** 2, 0) / n;
     const stddev = Math.sqrt(variance);
-    return {min, max, mean, median, stddev};
+    const marginOfError = 1.96 * stddev / Math.sqrt(n);
+    const relativeMarginOfError = mean !== 0 ? (marginOfError / Math.abs(mean)) * 100 : 0;
+    const confidenceInterval: [number, number] = [mean - marginOfError, mean + marginOfError];
+    const coefficientOfVariation = mean !== 0 ? stddev / Math.abs(mean) : 0;
+    return {min, max, mean, median, stddev, marginOfError, relativeMarginOfError, confidenceInterval, coefficientOfVariation};
 }
