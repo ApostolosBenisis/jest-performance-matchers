@@ -21,6 +21,7 @@ Make sure you reference the issue in the commit message as well, by including "R
 
 - **Always create a feature branch and open a PR** — never commit directly to main
 - Use conventional commit messages (e.g., `feat:`, `fix:`, `docs:`)
+- **Default merge strategy is rebase** (`gh pr merge --rebase`) — use squash only when commit messages don't reflect the history we want to tell
 
 ## Quality gates (before every commit)
 
