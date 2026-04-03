@@ -1,39 +1,62 @@
 # jest-performance-matchers
 
-[![SonarCloud](https://sonarcloud.io/images/project_badges/sonarcloud-white.svg)](https://sonarcloud.io/summary/new_code?id=ApostolosBenisis_jest-performance-matchers)
-
+[![npm version](https://img.shields.io/npm/v/jest-performance-matchers)](https://www.npmjs.com/package/jest-performance-matchers)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Node.js CI](https://github.com/ApostolosBenisis/jest-performance-matchers/actions/workflows/node.js.yml/badge.svg)](https://github.com/ApostolosBenisis/jest-performance-matchers/actions/workflows/node.js.yml)
 [![Security Rating](https://sonarcloud.io/api/project_badges/measure?project=ApostolosBenisis_jest-performance-matchers&metric=security_rating)](https://sonarcloud.io/summary/new_code?id=ApostolosBenisis_jest-performance-matchers)
 [![Coverage](https://sonarcloud.io/api/project_badges/measure?project=ApostolosBenisis_jest-performance-matchers&metric=coverage)](https://sonarcloud.io/summary/new_code?id=ApostolosBenisis_jest-performance-matchers)
 [![Reliability Rating](https://sonarcloud.io/api/project_badges/measure?project=ApostolosBenisis_jest-performance-matchers&metric=reliability_rating)](https://sonarcloud.io/summary/new_code?id=ApostolosBenisis_jest-performance-matchers)
-
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![npm version](https://img.shields.io/npm/v/jest-performance-matchers)](https://www.npmjs.com/package/jest-performance-matchers)
 
 ```
                 ┌───┐
              ┌──┤   ├──┐
              │  │   │  │
           ┌──┤  │   │  ├──┐
-          │  │  │   │  │  │
-       ┌──┤  │  │   │  │  ├──┐
-       │  │  │  │   │  │  │  │
-    ┌──┤  │  │  │   │  │  │  ├──┐
-────┴──┴──┴──┴──┴───┴──┴──┴──┴──┴────
-P0      P25      P50      P75      P100
-                  ⏱
-
-       jest-performance-matchers
-       Assert · Measure · Prove
+          │  │  │   │  │  ├──┐
+       ┌──┤  │  │   │  │  │  ├──┐
+       │  │  │  │   │  │  │  │  ├──┐
+    ┌──┤  │  │  │   │  │  │  │  │  ├────┐
+────┴──┴──┴──┴──┴───┴──┴──┴──┴──┴──┴────┴───────
+         jest-performance-matchers
+         Assert · Measure · Prove
 ```
 
-A minimalistic library with Jest matchers for measuring code performance in Node.js.
+Jest matchers for **statistically reliable** performance testing in Node.js. Measure code execution time over multiple iterations, assert on quantiles, and catch performance regressions in CI — all with zero dependencies.
+
+```ts
+// Ensure your API handler stays fast — P95 under 50ms across 100 runs
+await expect(async () => {
+    await handleRequest(mockReq);
+}).toResolveWithinQuantile(50, { iterations: 100, quantile: 95, warmup: 5 });
+```
+
+## What is this for?
+
+Use `jest-performance-matchers` when you need to:
+
+- **Set performance budgets in CI** — fail the build when critical paths exceed time limits
+- **Detect performance regressions** — catch slowdowns before they reach production
+- **Validate with statistical confidence** — assert on percentiles (P90, P95, P99), not single flaky runs
+
+If you already have Jest tests, adding performance assertions takes one import and one line of code.
+
+## Why not just `Date.now()`?
+
+| | `Date.now()` / manual timing | `jest-performance-matchers` |
+|---|---|---|
+| **Accuracy** | ~1ms resolution | Sub-millisecond (`process.hrtime()`) |
+| **Flakiness** | Single run = noisy result | Multiple iterations + quantiles = stable |
+| **Outliers** | One GC pause fails the test | IQR-based outlier removal |
+| **Diagnostics** | You get a number | Mean, median, CI, percentiles, warnings |
+| **Warmup** | DIY or forget about it | Built-in warmup iterations |
+| **Dependencies** | DIY everything | Zero deps — all math in-house |
 
 ## Why jest-performance-matchers?
 
-- **Zero dependencies** — all statistics and math implemented in-house
+- **Zero dependencies** — lightweight and safe to add; all statistics implemented in-house
 - **Full TypeScript support** — type declarations included, works seamlessly with `ts-jest`
-- **High-resolution timing** — uses `process.hrtime()` for sub-millisecond accuracy
-- **Statistical rigor** — 95% confidence intervals (Student's t for small samples, z for large), IQR-based outlier detection, and rich diagnostics on failure
+- **High-resolution timing** — `process.hrtime()` for sub-millisecond accuracy
+- **Statistical rigor** — 95% confidence intervals (Student's t / z), IQR outlier detection, rich diagnostics on failure
 - **Warmup iterations** — exclude JIT compilation and cache warming from measurements
 - **Exported utilities** — use `calcStats()`, `calcQuantile()`, and `removeOutliers()` directly in your own code
 
@@ -73,6 +96,32 @@ import 'jest-performance-matchers';
 > **TypeScript:** If you are using `ts-jest`, importing `jest-performance-matchers` will
 > automatically register the custom matchers and their type declarations — no extra
 > setup is needed.
+
+## Real-world examples
+
+### UI render budget (60fps = 16ms per frame)
+
+```ts
+expect(() => {
+    renderComponent(props);
+}).toCompleteWithinQuantile(16, { iterations: 50, quantile: 95, warmup: 3 });
+```
+
+### API latency budget
+
+```ts
+await expect(async () => {
+    await handleRequest(mockReq);
+}).toResolveWithinQuantile(100, { iterations: 100, quantile: 90, warmup: 5, outliers: 'remove' });
+```
+
+### Data processing throughput
+
+```ts
+expect(() => {
+    transformDataset(records);
+}).toCompleteWithinQuantile(200, { iterations: 30, quantile: 95 });
+```
 
 ## Matchers
 
@@ -189,6 +238,23 @@ The diagnostics include:
 - **Distribution percentiles** — min, P25, P50, P75, P90, max
 - **Warnings** — contextual alerts (e.g., small sample size, empty dataset)
 
+## Test stability / CI notes
+
+Performance tests are inherently noisier than functional tests. Here are guidelines for reliable results:
+
+- **Use >= 30 iterations** for statistical confidence (enables z-distribution CI instead of Student's t)
+- **Use quantiles instead of single-run thresholds** — P95 absorbs occasional spikes without failing the build
+- **Add warmup iterations** (3–5) to exclude JIT compilation and cache-warming overhead
+- **Use outlier removal** (`outliers: 'remove'`) to filter GC pauses and OS scheduling jitter
+- **Set generous thresholds** in CI — shared runners have variable performance; allow 2–3x headroom over local measurements
+
+## When NOT to use this
+
+- **Microbenchmarking at CPU-instruction level** — use [Benchmark.js](https://benchmarkjs.com/) or [tinybench](https://github.com/tinylibs/tinybench) for that
+- **Browser performance** — this library uses `process.hrtime()`, which is Node.js only
+- **Profiling and flame graphs** — use Node.js inspector or clinic.js for detailed profiling
+- **Production monitoring** — this is for tests, not runtime telemetry
+
 ## Exported utilities
 
 The library exports three utility functions from `jest-performance-matchers/metrics` that you can use independently:
@@ -255,6 +321,12 @@ The `Stats` interface returned by `calcStats()`:
 | `warnings` | `string[]` | Contextual warnings about the dataset |
 
 Fields are `null` when there is insufficient data to compute them (e.g., `stddev` is `null` for a single data point).
+
+## Mental model
+
+1. **Measure multiple runs** — a single execution is noisy; use `iterations` for stable data
+2. **Assert on quantiles** — P95 means "95% of runs were this fast or faster"
+3. **Warm up, then measure** — let JIT and caches stabilize before collecting data
 
 ## How to Contribute
 

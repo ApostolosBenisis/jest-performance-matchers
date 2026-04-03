@@ -26,7 +26,10 @@
     "measure",
     "test",
     "testing",
-    "assertions"
+    "assertions",
+    "benchmark",
+    "profiling",
+    "statistics"
   ],
   "author": "Apostolos Benisis <apostolos@benisis.de>",
   "license": "MIT",
