@@ -6,7 +6,7 @@ export interface ShapeDiagnostics {
 function validateData(data: number[]): void {
     if (!data || !Array.isArray(data) || data.length === 0) throw new Error("Data must be an array of numbers and must contain at least one element");
     for (const v of data) {
-        if (typeof v !== 'number' || Number.isNaN(v)) throw new Error("Data must be an array of numbers and must contain at least one element");
+        if (!Number.isFinite(v)) throw new Error("Data must be an array of numbers and must contain at least one element");
     }
 }
 
