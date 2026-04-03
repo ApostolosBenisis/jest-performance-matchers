@@ -47,7 +47,7 @@ If you already have Jest tests, adding performance assertions takes one import a
 | **Accuracy** | ~1ms resolution | Sub-millisecond (`process.hrtime()`) |
 | **Flakiness** | Single run = noisy result | Multiple iterations + quantiles = stable |
 | **Outliers** | One GC pause fails the test | IQR-based outlier removal |
-| **Diagnostics** | You get a number | Mean, median, CI, percentiles, warnings |
+| **Diagnostics** | You get a number | Mean, median, CI, percentiles, shape analysis, sparklines |
 | **Warmup** | DIY or forget about it | Built-in warmup iterations |
 | **Dependencies** | DIY everything | Zero deps — all math in-house |
 
@@ -56,7 +56,7 @@ If you already have Jest tests, adding performance assertions takes one import a
 - **Zero dependencies** — lightweight and safe to add; all statistics implemented in-house
 - **Full TypeScript support** — type declarations included, works seamlessly with `ts-jest`
 - **High-resolution timing** — `process.hrtime()` for sub-millisecond accuracy
-- **Statistical rigor** — 95% confidence intervals (Student's t / z), IQR outlier detection, rich diagnostics on failure
+- **Statistical rigor** — 95% confidence intervals (Student's t / z), IQR outlier detection, skewness analysis, distribution shape classification, and rich diagnostics on failure
 - **Warmup iterations** — exclude JIT compilation and cache warming from measurements
 - **Exported utilities** — use `calcStats()`, `calcQuantile()`, and `removeOutliers()` directly in your own code
 
@@ -228,6 +228,7 @@ instead it was 8.34 (ms)
 Statistics (n=100): mean=6.12ms, median=5.87ms, stddev=2.45ms
 95% CI: [5.63, 6.61]ms | RME: 7.99% | CV: 0.40
 Distribution: min=2.10ms | P25=4.50ms | P50=5.87ms | P75=7.20ms | P90=8.10ms | max=15.30ms
+Shape: right-skewed (skewness=0.85) | ▁▃▇█▅▃▂▁▁▁
 ```
 
 The diagnostics include:
@@ -236,6 +237,7 @@ The diagnostics include:
 - **RME (Relative Margin of Error)** — margin of error as a percentage of the mean
 - **CV (Coefficient of Variation)** — standard deviation relative to the mean
 - **Distribution percentiles** — min, P25, P50, P75, P90, max
+- **Distribution shape** — skewness value, shape classification (symmetric, left-skewed, right-skewed, bimodal, constant), and an ASCII sparkline histogram for at-a-glance visualization. Shape diagnostics are most reliable with n > 100; smaller samples produce noisier sparklines and less stable labels
 - **Warnings** — contextual alerts (e.g., small sample size, empty dataset)
 
 ## Test stability / CI notes
@@ -257,7 +259,7 @@ Performance tests are inherently noisier than functional tests. Here are guideli
 
 ## Exported utilities
 
-The library exports three utility functions from `jest-performance-matchers/metrics` that you can use independently:
+The library exports utility functions that you can use independently:
 
 ### `calcStats(data: number[]): Stats`
 
@@ -299,6 +301,26 @@ const durations = [5, 5.1, 5.2, 5.0, 4.9, 50];  // 50 is an outlier
 const cleaned = removeOutliers(durations);          // [5, 5.1, 5.2, 5.0, 4.9]
 ```
 
+### `calcShapeDiagnostics(data: number[], skewness: number | null, stddev: number | null): ShapeDiagnostics`
+
+Classify the distribution shape and generate a sparkline histogram:
+
+```ts
+import { calcShapeDiagnostics } from 'jest-performance-matchers/shape';
+import { calcStats } from 'jest-performance-matchers/metrics';
+
+const durations = [4.2, 5.1, 4.8, 5.5, 4.9, 5.3, 5.0, 4.7];
+const stats = calcStats(durations);
+const shape = calcShapeDiagnostics(durations, stats.skewness, stats.stddev);
+
+console.log(shape.label);     // "symmetric"
+console.log(shape.sparkline); // "▁▃▇█▅▃▂▁▁▁" (ASCII histogram)
+```
+
+Shape labels: `"symmetric"`, `"left-skewed"`, `"right-skewed"`, `"bimodal"`, `"constant"`, `"insufficient data"`.
+
+> **Note:** Shape diagnostics are most reliable with n > 100. Smaller samples produce noisier sparklines and less stable shape labels.
+
 ### `Stats` interface
 
 The `Stats` interface returned by `calcStats()`:
@@ -315,6 +337,7 @@ The `Stats` interface returned by `calcStats()`:
 | `relativeMarginOfError` | `number \| null` | RME as a percentage of the mean |
 | `confidenceInterval` | `[number, number] \| null` | 95% CI [lower, upper] for the mean |
 | `coefficientOfVariation` | `number \| null` | CV (stddev / \|mean\|) |
+| `skewness` | `number \| null` | Sample skewness (adjusted Fisher-Pearson G1). `null` for n < 3 or stddev = 0 |
 | `isSmallSample` | `boolean` | `true` when n <= 30 |
 | `confidenceMethod` | `"z" \| "t" \| null` | Distribution used for the CI |
 | `confidenceCriticalValue` | `number \| null` | Critical value used for the CI |

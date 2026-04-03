@@ -174,6 +174,7 @@ describe("Test calcStats function", () => {
         expect(stats.relativeMarginOfError).toBeNull();
         expect(stats.confidenceInterval).toBeNull();
         expect(stats.coefficientOfVariation).toBeNull();
+        expect(stats.skewness).toBeNull();
         expect(stats.isSmallSample).toBe(true);
         expect(stats.confidenceMethod).toBeNull();
         expect(stats.confidenceCriticalValue).toBeNull();
@@ -196,6 +197,8 @@ describe("Test calcStats function", () => {
         expect(stats.marginOfError).toBeCloseTo(expectedMoE, 10);
         expect(stats.confidenceInterval![0]).toBeCloseTo(15 - expectedMoE, 10);
         expect(stats.confidenceInterval![1]).toBeCloseTo(15 + expectedMoE, 10);
+        // Skewness requires n >= 3, so null for n=2
+        expect(stats.skewness).toBeNull();
     });
 
     test("should calculate stats for identical values", () => {
@@ -211,6 +214,8 @@ describe("Test calcStats function", () => {
         expect(stats.confidenceInterval).toEqual([10, 10]);
         expect(stats.coefficientOfVariation).toBe(0);
         expect(stats.confidenceMethod).toBe("t");
+        // Skewness null when stddev is 0
+        expect(stats.skewness).toBeNull();
     });
 
     test("should return null for RME and CV when mean is zero", () => {
@@ -271,5 +276,34 @@ describe("Test calcStats function", () => {
         const data = [3, 1, 2];
         calcStats(data);
         expect(data).toEqual([3, 1, 2]);
+    });
+
+    test("should compute skewness for n=3 (minimum valid case)", () => {
+        const stats = calcStats([1, 2, 10]);
+        expect(stats.skewness).not.toBeNull();
+        // Hand-computed G1 for [1, 2, 10]: 1.652316740332991
+        expect(stats.skewness).toBeCloseTo(1.652316740332991, 10);
+    });
+
+    test("should compute positive skewness for right-skewed data", () => {
+        const stats = calcStats([1, 2, 2, 3, 3, 3, 10]);
+        expect(stats.skewness).not.toBeNull();
+        expect(stats.skewness!).toBeGreaterThan(0.5);
+        // Hand-computed G1: 2.294375699439329
+        expect(stats.skewness).toBeCloseTo(2.294375699439329, 10);
+    });
+
+    test("should compute negative skewness for left-skewed data", () => {
+        const stats = calcStats([1, 8, 8, 9, 9, 9, 10]);
+        expect(stats.skewness).not.toBeNull();
+        expect(stats.skewness!).toBeLessThan(-0.5);
+        // Hand-computed G1: -2.362764941760541
+        expect(stats.skewness).toBeCloseTo(-2.362764941760541, 10);
+    });
+
+    test("should compute zero skewness for perfectly symmetric data", () => {
+        const stats = calcStats([1, 2, 3, 4, 5]);
+        expect(stats.skewness).not.toBeNull();
+        expect(stats.skewness).toBe(0);
     });
 });

@@ -1,6 +1,7 @@
 import {expect} from '@jest/globals';
 import {printReceived, printExpected} from 'jest-matcher-utils';
 import {calcQuantile, calcStats, removeOutliers, Stats} from "./metrics";
+import {calcShapeDiagnostics} from "./shape";
 
 const nowInMillis = () => {
     const hrTime = process.hrtime();
@@ -158,10 +159,14 @@ function formatStatsBlock(stats: Stats, durations: number[]): string {
     const p75 = calcQuantile(75, durations);
     const p90 = calcQuantile(90, durations);
 
+    const shapeDiag = calcShapeDiagnostics(durations, stats.skewness, stats.stddev);
+    const skewnessText = stats.skewness === null ? 'N/A' : stats.skewness.toFixed(2);
+
     const lines = [
         `Statistics (n=${stats.n}): mean=${formatStatValue(stats.mean)}ms, median=${formatStatValue(stats.median)}ms, stddev=${formatStatValue(stats.stddev)}ms`,
         `${ciText} | ${rmeText} | ${cvText}`,
         `Distribution: min=${formatStatValue(stats.min)}ms | P25=${formatStatValue(p25)}ms | P50=${formatStatValue(p50)}ms | P75=${formatStatValue(p75)}ms | P90=${formatStatValue(p90)}ms | max=${formatStatValue(stats.max)}ms`,
+        `Shape: ${shapeDiag.label} (skewness=${skewnessText}) | ${shapeDiag.sparkline}`,
     ];
 
     if (stats.warnings.length > 0) {
