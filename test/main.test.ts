@@ -1,5 +1,6 @@
 import '../src/main';
 import * as metrics from '../src/metrics';
+import {calcShapeDiagnostics} from '../src/shape';
 import {printExpected, printReceived} from "jest-matcher-utils";
 
 
@@ -22,10 +23,14 @@ function buildStatsBlock(durations: number[]): string {
     const p75 = metrics.calcQuantile(75, durations);
     const p90 = metrics.calcQuantile(90, durations);
 
+    const shapeDiag = calcShapeDiagnostics(durations, stats.skewness, stats.stddev);
+    const skewnessText = stats.skewness === null ? 'N/A' : stats.skewness.toFixed(2);
+
     const lines = [
         `Statistics (n=${stats.n}): mean=${fmt(stats.mean)}ms, median=${fmt(stats.median)}ms, stddev=${fmt(stats.stddev)}ms`,
         `${ciText} | ${rmeText} | ${cvText}`,
         `Distribution: min=${fmt(stats.min)}ms | P25=${fmt(p25)}ms | P50=${fmt(p50)}ms | P75=${fmt(p75)}ms | P90=${fmt(p90)}ms | max=${fmt(stats.max)}ms`,
+        `Shape: ${shapeDiag.label} (skewness=${skewnessText}) | ${shapeDiag.sparkline}`,
     ];
 
     if (stats.warnings.length > 0) {
@@ -427,6 +432,87 @@ describe("Test jest expect.toCompleteWithinQuantile assertion", () => {
         expect(errorMessage).toContain('RME: N/A');
         expect(errorMessage).toContain('CV: N/A');
     });
+
+    test("Should show Shape line in failure message", () => {
+        // GIVEN a function with varying durations
+        const durations = [5, 10, 15, 20, 25];
+        const I = durations.length;
+        mockFunctionProcessTimes(durations);
+
+        // WHEN asserting and it fails
+        let errorMessage = '';
+        try {
+            expect(() => undefined).toCompleteWithinQuantile(1, {iterations: I, quantile: 1});
+        } catch (e) {
+            errorMessage = (e as Error).message;
+        }
+
+        // THEN the message should contain the Shape line with label and sparkline
+        // eslint-disable-next-line no-console
+        console.log(`\n--- Failure message (symmetric, n=${I}) ---\n${errorMessage}\n`);
+        expect(errorMessage).toContain('Shape:');
+        expect(errorMessage).toContain('skewness=');
+    });
+
+    test("Should show 'insufficient data' shape for n=1", () => {
+        // GIVEN a function with a single iteration
+        const T = 10;
+        mockFunctionProcessTimes([T]);
+
+        // WHEN asserting and it fails
+        let errorMessage = '';
+        try {
+            expect(() => undefined).toCompleteWithinQuantile(T - 1, {iterations: 1, quantile: 1});
+        } catch (e) {
+            errorMessage = (e as Error).message;
+        }
+
+        // THEN the shape should be 'insufficient data'
+        // eslint-disable-next-line no-console
+        console.log(`\n--- Failure message (insufficient data, n=1) ---\n${errorMessage}\n`);
+        expect(errorMessage).toContain('Shape: insufficient data (skewness=N/A)');
+    });
+
+    test("Should show 'constant' shape for identical durations (n >= 3)", () => {
+        // GIVEN a function with identical durations
+        const T = 10;
+        const I = 5;
+        mockFunctionProcessTimes(Array(I).fill(T));
+
+        // WHEN asserting and it fails
+        let errorMessage = '';
+        try {
+            expect(() => undefined).toCompleteWithinQuantile(T - 1, {iterations: I, quantile: 1});
+        } catch (e) {
+            errorMessage = (e as Error).message;
+        }
+
+        // THEN the shape should be 'constant' since all values are the same
+        // eslint-disable-next-line no-console
+        console.log(`\n--- Failure message (constant, n=${I}) ---\n${errorMessage}\n`);
+        expect(errorMessage).toContain('Shape: constant (skewness=N/A)');
+    });
+
+    test("Should show right-skewed shape for realistic latency distribution (n=50)", () => {
+        // GIVEN a function with right-skewed durations (simulating realistic API latencies)
+        const durations = [15.75,4.44,13.11,7.87,13.56,5.89,5.67,15.54,21.76,3.34,8.35,7.41,10.11,21.03,5.05,4.16,7.01,6.7,4.64,4.51,13.53,3.14,41.15,20.43,9.87,3.86,4.2,5.5,3.48,7.92,3.63,3.09,4.25,5,3.74,3.17,4.61,3.21,20.4,2.04,3.17,5.05,12.82,9.98,4.44,5.74,5.02,7.24,11.99,23.17];
+        const I = durations.length;
+        mockFunctionProcessTimes(durations);
+
+        // WHEN asserting and it fails
+        let errorMessage = '';
+        try {
+            expect(() => undefined).toCompleteWithinQuantile(1, {iterations: I, quantile: 1});
+        } catch (e) {
+            errorMessage = (e as Error).message;
+        }
+
+        // THEN the message should show right-skewed shape with sparkline
+        // eslint-disable-next-line no-console
+        console.log(`\n--- Failure message (right-skewed latencies, n=${I}) ---\n${errorMessage}\n`);
+        expect(errorMessage).toContain('Shape: right-skewed');
+        expect(errorMessage).toContain('skewness=');
+    });
 });
 
 describe("Test jest expect.toResolveWithinQuantile assertion", () => {
@@ -587,6 +673,27 @@ describe("Test jest expect.toResolveWithinQuantile assertion", () => {
 
         // THEN removeOutliers should not be called
         expect(metrics.removeOutliers).not.toHaveBeenCalled();
+    });
+
+    test("Should show Shape line in async failure message", async () => {
+        // GIVEN a promise with varying durations
+        const durations = [5, 10, 15, 20, 25];
+        const I = durations.length;
+        mockFunctionProcessTimes(durations);
+
+        // WHEN asserting and it fails
+        let errorMessage = '';
+        try {
+            await expect(() => Promise.resolve()).toResolveWithinQuantile(1, {iterations: I, quantile: 1});
+        } catch (e) {
+            errorMessage = (e as Error).message;
+        }
+
+        // THEN the message should contain the Shape line
+        // eslint-disable-next-line no-console
+        console.log(`\n--- Async failure message (symmetric, n=${I}) ---\n${errorMessage}\n`);
+        expect(errorMessage).toContain('Shape:');
+        expect(errorMessage).toContain('skewness=');
     });
 });
 

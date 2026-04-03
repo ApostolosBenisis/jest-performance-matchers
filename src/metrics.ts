@@ -57,6 +57,8 @@ export interface Stats {
     confidenceInterval: [number, number] | null;
     /** Coefficient of variation (stddev / |mean|). null when stddev or mean is unavailable. */
     coefficientOfVariation: number | null;
+    /** Sample skewness (adjusted Fisher-Pearson G1). null when n < 3 or stddev is 0. */
+    skewness: number | null;
     /** true when n <= 30 */
     isSmallSample: boolean;
     /** The method used for the confidence interval: "z" (normal), "t" (Student's t), or null. */
@@ -120,7 +122,7 @@ export function calcStats(data: number[]): Stats {
         return {
             n, min, max, mean, median, stddev: null,
             marginOfError: null, relativeMarginOfError: null, confidenceInterval: null,
-            coefficientOfVariation: null, isSmallSample, confidenceMethod: null,
+            coefficientOfVariation: null, skewness: null, isSmallSample, confidenceMethod: null,
             confidenceCriticalValue: null, warnings
         };
     }
@@ -135,9 +137,16 @@ export function calcStats(data: number[]): Stats {
     const confidenceInterval: [number, number] = [mean - marginOfError, mean + marginOfError];
     const coefficientOfVariation = mean === 0 ? null : stddev / Math.abs(mean);
 
+    // Adjusted Fisher-Pearson skewness (G1): [n / ((n-1)(n-2))] * SUM[((xi - mean) / s)^3]
+    let skewness: number | null = null;
+    if (n >= 3 && stddev > 0) {
+        const sumCubedDeviations = data.reduce((sum, v) => sum + ((v - mean) / stddev) ** 3, 0);
+        skewness = (n / ((n - 1) * (n - 2))) * sumCubedDeviations;
+    }
+
     return {
         n, min, max, mean, median, stddev, marginOfError, relativeMarginOfError,
-        confidenceInterval, coefficientOfVariation, isSmallSample, confidenceMethod,
+        confidenceInterval, coefficientOfVariation, skewness, isSmallSample, confidenceMethod,
         confidenceCriticalValue, warnings
     };
 }
