@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.1] - YYYY-MM-DD
+
+### Fixed
+- `calcStats()` and `removeOutliers()` now validate input and throw a descriptive error on invalid data (non-array, empty array, non-number elements, NaN elements), matching `calcQuantile()`'s existing contract. Previously, `calcStats([])` silently returned an all-nulls `Stats` object; it now throws. This is a behavioral breaking change for callers relying on the empty-array graceful return.
+- `calcQuantile()`, `calcStats()`, and `removeOutliers()` now correctly reject sparse arrays (e.g., `[1, , 3]`). Previously, `Array.prototype.some` skipped empty slots, allowing sparse arrays to pass validation and silently inject `NaN` into calculations.
+
 ## [1.2.0] - 2026-04-02
 
 ### Added

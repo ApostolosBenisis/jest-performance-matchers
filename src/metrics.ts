@@ -6,6 +6,10 @@
  * For datasets with fewer than 4 elements, returns a copy unchanged (IQR is unreliable).
  */
 export function removeOutliers(data: number[]): number[] {
+    if (!data || !Array.isArray(data) || data.length === 0) throw new Error("Data must be an array of numbers and must contain at least one element");
+    for (const v of data) {
+        if (typeof v !== 'number' || Number.isNaN(v)) throw new Error("Data must be an array of numbers and must contain at least one element");
+    }
     if (data.length < 4) return [...data];
     const sorted = [...data].sort((a, b) => a - b);
     const q1 = calcQuantileOnSorted(0.25, sorted);
@@ -18,7 +22,10 @@ export function removeOutliers(data: number[]): number[] {
 
 export function calcQuantile(q: number, data: number[]): number {
     if (!Number.isInteger(q) || q <= 0 || q > 100) throw new Error("Quantile must be an integer greater than 0 and less than or equal to 100");
-    if (!data || !Array.isArray(data) || data.length === 0 || data.some(v => typeof v !== 'number' || Number.isNaN(v))) throw new Error("Data must be an array of numbers and must contain at least one element");
+    if (!data || !Array.isArray(data) || data.length === 0) throw new Error("Data must be an array of numbers and must contain at least one element");
+    for (const v of data) {
+        if (typeof v !== 'number' || Number.isNaN(v)) throw new Error("Data must be an array of numbers and must contain at least one element");
+    }
     const sorted = [...data].sort((a, b) => a - b);
     return calcQuantileOnSorted(q / 100, sorted);
 }
@@ -93,18 +100,12 @@ function getCriticalValue(n: number): { method: "z" | "t"; value: number } {
  * Confidence intervals use Student's t-distribution for n <= 30, z-distribution for n >= 31.
  */
 export function calcStats(data: number[]): Stats {
+    if (!data || !Array.isArray(data) || data.length === 0) throw new Error("Data must be an array of numbers and must contain at least one element");
+    for (const v of data) {
+        if (typeof v !== 'number' || Number.isNaN(v)) throw new Error("Data must be an array of numbers and must contain at least one element");
+    }
     const n = data.length;
     const warnings: string[] = [];
-
-    if (n === 0) {
-        warnings.push("Empty dataset: no statistics can be computed");
-        return {
-            n, min: null, max: null, mean: null, median: null, stddev: null,
-            marginOfError: null, relativeMarginOfError: null, confidenceInterval: null,
-            coefficientOfVariation: null, isSmallSample: true, confidenceMethod: null,
-            confidenceCriticalValue: null, warnings
-        };
-    }
 
     const sorted = [...data].sort((a, b) => a - b);
     const min = sorted[0];

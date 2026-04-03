@@ -32,7 +32,9 @@ describe("Test calcQuantile function", () => {
         ["null", null],
         ["not an array", "string"],
         ["not an array of numbers", ["NaN", "0.2"]],
-        ["an empty array", []]
+        ["an empty array", []],
+        // eslint-disable-next-line no-sparse-arrays
+        ["a sparse array", [1, , 3]]
     ])("should throw an error when data is %s", (description, data) => {
         // @ts-expect-error - intentionally passing invalid data for testing
         expect(() => calcQuantile(50, data)).toThrowError(/Data must be an array of numbers and must contain at least one element/);
@@ -84,6 +86,20 @@ describe("Test removeOutliers function", () => {
         const result = removeOutliers(data);
         expect(result).toEqual([5, 5, 5, 5, 5]);
     });
+
+    test.each([
+        ["undefined", undefined],
+        ["null", null],
+        ["not an array", "string"],
+        ["not an array of numbers", ["1", "2", "3", "4"]],
+        ["an empty array", []],
+        ["an array containing NaN", [1, NaN, 3, 4]],
+        // eslint-disable-next-line no-sparse-arrays
+        ["a sparse array", [1, , 3, 4]],
+    ])("should throw an error when data is %s", (description, data) => {
+        // @ts-expect-error - intentionally passing invalid data for testing
+        expect(() => removeOutliers(data)).toThrowError(/Data must be an array of numbers and must contain at least one element/);
+    });
 });
 
 describe("Test calcStats function", () => {
@@ -132,22 +148,18 @@ describe("Test calcStats function", () => {
         expect(stats.coefficientOfVariation).toBeCloseTo(Math.sqrt(2.5) / 3, 10);
     });
 
-    test("should return nulls for empty dataset (n=0)", () => {
-        const stats = calcStats([]);
-        expect(stats.n).toBe(0);
-        expect(stats.min).toBeNull();
-        expect(stats.max).toBeNull();
-        expect(stats.mean).toBeNull();
-        expect(stats.median).toBeNull();
-        expect(stats.stddev).toBeNull();
-        expect(stats.marginOfError).toBeNull();
-        expect(stats.relativeMarginOfError).toBeNull();
-        expect(stats.confidenceInterval).toBeNull();
-        expect(stats.coefficientOfVariation).toBeNull();
-        expect(stats.isSmallSample).toBe(true);
-        expect(stats.confidenceMethod).toBeNull();
-        expect(stats.confidenceCriticalValue).toBeNull();
-        expect(stats.warnings).toContain("Empty dataset: no statistics can be computed");
+    test.each([
+        ["undefined", undefined],
+        ["null", null],
+        ["not an array", "string"],
+        ["not an array of numbers", ["1", "2", "3", "4"]],
+        ["an empty array", []],
+        ["an array containing NaN", [1, NaN, 3, 4]],
+        // eslint-disable-next-line no-sparse-arrays
+        ["a sparse array", [1, , 3, 4]],
+    ])("should throw an error when data is %s", (description, data) => {
+        // @ts-expect-error - intentionally passing invalid data for testing
+        expect(() => calcStats(data)).toThrowError(/Data must be an array of numbers and must contain at least one element/);
     });
 
     test("should return null stddev and CI for a single value (n=1)", () => {
