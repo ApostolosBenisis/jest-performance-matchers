@@ -25,14 +25,16 @@ describe("Test calcShapeDiagnostics function", () => {
             expect(result.label).toBe("insufficient data");
         });
 
-        test("should classify as 'insufficient data' for n=2 (stddev non-null, skewness null)", () => {
+        test("should classify as 'insufficient data' for n=2 (Rule 1: n < 3 guard)", () => {
             const stats = calcStats([10, 20]);
             const result = calcShapeDiagnostics([10, 20], null, stats.stddev);
             expect(result.label).toBe("insufficient data");
         });
 
         test("should classify as 'insufficient data' when skewness is null but stddev and n >= 3", () => {
-            // Rule 3: skewness null with non-null non-zero stddev and n >= 3
+            // Rule 3: skewness null with non-null non-zero stddev and n >= 3.
+            // stddev=1.0 is intentionally decoupled from the data — we are testing
+            // the null-skewness guard, not the statistical correctness of stddev.
             const result = calcShapeDiagnostics([1, 2, 3], null, 1.0);
             expect(result.label).toBe("insufficient data");
         });
