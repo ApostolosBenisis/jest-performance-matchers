@@ -5,11 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.2.1] - YYYY-MM-DD
+## [1.3.0] - 2026-04-04
+
+### Added
+- Distribution shape diagnostics in quantile matcher failure messages: skewness metric (adjusted Fisher-Pearson G1), shape classification (symmetric, left-skewed, right-skewed, bimodal, constant, insufficient data), and ASCII sparkline histogram to help diagnose flaky performance tests caused by noisy or skewed measurements. (Closes #12)
+
+### Changed
+- README rewritten for clarity, discoverability, and adoption — added npm version badge, value-proposition sections, real-world examples, CI stability notes, and full API reference. (Ref: #9, #38)
 
 ### Fixed
-- `calcStats()` and `removeOutliers()` now validate input and throw a descriptive error on invalid data (non-array, empty array, non-number elements, NaN elements), matching `calcQuantile()`'s existing contract. Previously, `calcStats([])` silently returned an all-nulls `Stats` object; it now throws. This is a behavioral breaking change for callers relying on the empty-array graceful return.
-- `calcQuantile()`, `calcStats()`, and `removeOutliers()` now correctly reject sparse arrays (e.g., `[1, , 3]`). Previously, `Array.prototype.some` skipped empty slots, allowing sparse arrays to pass validation and silently inject `NaN` into calculations.
+- `calcStats()` and `removeOutliers()` now validate input and throw a descriptive error on invalid data (non-array, empty array, non-number elements, NaN elements), matching `calcQuantile()`'s existing contract. Previously, `calcStats([])` silently returned an all-nulls `Stats` object; it now throws. (Ref: #11)
+- `calcQuantile()`, `calcStats()`, and `removeOutliers()` now correctly reject sparse arrays (e.g., `[1, , 3]`). Previously, `Array.prototype.some` skipped empty slots, allowing sparse arrays to pass validation and silently inject `NaN` into calculations. (Ref: #11)
+- `calcQuantile()`, `calcStats()`, `removeOutliers()`, and `calcShapeDiagnostics()` now reject `Infinity` and `-Infinity` values. Validation upgraded from `typeof v !== 'number' || Number.isNaN(v)` to `!Number.isFinite(v)`. (Ref: #45)
 
 ## [1.2.0] - 2026-04-02
 
