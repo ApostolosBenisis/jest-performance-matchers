@@ -8,7 +8,7 @@
 export function removeOutliers(data: number[]): number[] {
     if (!data || !Array.isArray(data) || data.length === 0) throw new Error("Data must be an array of numbers and must contain at least one element");
     for (const v of data) {
-        if (typeof v !== 'number' || Number.isNaN(v)) throw new Error("Data must be an array of numbers and must contain at least one element");
+        if (!Number.isFinite(v)) throw new Error("Data must be an array of numbers and must contain at least one element");
     }
     if (data.length < 4) return [...data];
     const sorted = [...data].sort((a, b) => a - b);
@@ -24,7 +24,7 @@ export function calcQuantile(q: number, data: number[]): number {
     if (!Number.isInteger(q) || q <= 0 || q > 100) throw new Error("Quantile must be an integer greater than 0 and less than or equal to 100");
     if (!data || !Array.isArray(data) || data.length === 0) throw new Error("Data must be an array of numbers and must contain at least one element");
     for (const v of data) {
-        if (typeof v !== 'number' || Number.isNaN(v)) throw new Error("Data must be an array of numbers and must contain at least one element");
+        if (!Number.isFinite(v)) throw new Error("Data must be an array of numbers and must contain at least one element");
     }
     const sorted = [...data].sort((a, b) => a - b);
     return calcQuantileOnSorted(q / 100, sorted);
@@ -104,7 +104,7 @@ function getCriticalValue(n: number): { method: "z" | "t"; value: number } {
 export function calcStats(data: number[]): Stats {
     if (!data || !Array.isArray(data) || data.length === 0) throw new Error("Data must be an array of numbers and must contain at least one element");
     for (const v of data) {
-        if (typeof v !== 'number' || Number.isNaN(v)) throw new Error("Data must be an array of numbers and must contain at least one element");
+        if (!Number.isFinite(v)) throw new Error("Data must be an array of numbers and must contain at least one element");
     }
     const n = data.length;
     const warnings: string[] = [];

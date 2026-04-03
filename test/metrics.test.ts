@@ -33,6 +33,8 @@ describe("Test calcQuantile function", () => {
         ["not an array", "string"],
         ["not an array of numbers", ["NaN", "0.2"]],
         ["an empty array", []],
+        ["an array containing Infinity", [1, Infinity, 3]],
+        ["an array containing -Infinity", [1, -Infinity, 3]],
         // eslint-disable-next-line no-sparse-arrays
         ["a sparse array", [1, , 3]]
     ])("should throw an error when data is %s", (description, data) => {
@@ -94,6 +96,8 @@ describe("Test removeOutliers function", () => {
         ["not an array of numbers", ["1", "2", "3", "4"]],
         ["an empty array", []],
         ["an array containing NaN", [1, NaN, 3, 4]],
+        ["an array containing Infinity", [1, Infinity, 3, 4]],
+        ["an array containing -Infinity", [1, -Infinity, 3, 4]],
         // eslint-disable-next-line no-sparse-arrays
         ["a sparse array", [1, , 3, 4]],
     ])("should throw an error when data is %s", (description, data) => {
@@ -155,6 +159,8 @@ describe("Test calcStats function", () => {
         ["not an array of numbers", ["1", "2", "3", "4"]],
         ["an empty array", []],
         ["an array containing NaN", [1, NaN, 3, 4]],
+        ["an array containing Infinity", [1, Infinity, 3, 4]],
+        ["an array containing -Infinity", [1, -Infinity, 3, 4]],
         // eslint-disable-next-line no-sparse-arrays
         ["a sparse array", [1, , 3, 4]],
     ])("should throw an error when data is %s", (description, data) => {

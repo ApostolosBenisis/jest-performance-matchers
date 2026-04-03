@@ -11,6 +11,8 @@ describe("Test calcShapeDiagnostics function", () => {
             ["not an array of numbers", ["1", "2", "3"]],
             ["an empty array", []],
             ["an array containing NaN", [1, NaN, 3]],
+            ["an array containing Infinity", [1, Infinity, 3]],
+            ["an array containing -Infinity", [1, -Infinity, 3]],
             // eslint-disable-next-line no-sparse-arrays
             ["a sparse array", [1, , 3]],
         ])("should throw an error when data is %s", (description, data) => {
