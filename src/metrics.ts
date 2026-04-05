@@ -6,9 +6,10 @@
  * For datasets with fewer than 4 elements, returns a copy unchanged (IQR is unreliable).
  */
 export function removeOutliers(data: number[]): number[] {
-    if (!data || !Array.isArray(data) || data.length === 0) throw new Error("Data must be an array of numbers and must contain at least one element");
-    for (const v of data) {
-        if (!Number.isFinite(v)) throw new Error("Data must be an array of numbers and must contain at least one element");
+    if (!Array.isArray(data)) throw new Error("Data is required and must be an array");
+    if (data.length === 0) throw new Error("Data must contain at least one element");
+    for (let i = 0; i < data.length; i++) {
+        if (!Number.isFinite(data[i])) throw new Error(`Data must contain only finite numbers, but found ${String(data[i])} at index ${i}`);
     }
     if (data.length < 4) return [...data];
     const sorted = [...data].sort((a, b) => a - b);
@@ -22,9 +23,10 @@ export function removeOutliers(data: number[]): number[] {
 
 export function calcQuantile(q: number, data: number[]): number {
     if (!Number.isInteger(q) || q <= 0 || q > 100) throw new Error("Quantile must be an integer greater than 0 and less than or equal to 100");
-    if (!data || !Array.isArray(data) || data.length === 0) throw new Error("Data must be an array of numbers and must contain at least one element");
-    for (const v of data) {
-        if (!Number.isFinite(v)) throw new Error("Data must be an array of numbers and must contain at least one element");
+    if (!Array.isArray(data)) throw new Error("Data is required and must be an array");
+    if (data.length === 0) throw new Error("Data must contain at least one element");
+    for (let i = 0; i < data.length; i++) {
+        if (!Number.isFinite(data[i])) throw new Error(`Data must contain only finite numbers, but found ${String(data[i])} at index ${i}`);
     }
     const sorted = [...data].sort((a, b) => a - b);
     return calcQuantileOnSorted(q / 100, sorted);
@@ -102,9 +104,10 @@ function getCriticalValue(n: number): { method: "z" | "t"; value: number } {
  * Confidence intervals use Student's t-distribution for n <= 30, z-distribution for n >= 31.
  */
 export function calcStats(data: number[]): Stats {
-    if (!data || !Array.isArray(data) || data.length === 0) throw new Error("Data must be an array of numbers and must contain at least one element");
-    for (const v of data) {
-        if (!Number.isFinite(v)) throw new Error("Data must be an array of numbers and must contain at least one element");
+    if (!Array.isArray(data)) throw new Error("Data is required and must be an array");
+    if (data.length === 0) throw new Error("Data must contain at least one element");
+    for (let i = 0; i < data.length; i++) {
+        if (!Number.isFinite(data[i])) throw new Error(`Data must contain only finite numbers, but found ${String(data[i])} at index ${i}`);
     }
     const n = data.length;
     const warnings: string[] = [];
