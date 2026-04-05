@@ -72,7 +72,7 @@ export function calcShapeDiagnostics(data: number[], skewness: number | null, st
         return { label: "constant", sparkline };
     }
 
-    // Rule 3: skewness unavailable (e.g. n=2 with non-null stddev)
+    // Rule 3: skewness unavailable despite n >= 3 and stddev > 0 (defensive guard; unreachable via calcStats)
     if (skewness === null) {
         return { label: "insufficient data", sparkline };
     }
