@@ -8,17 +8,9 @@
 [![Reliability Rating](https://sonarcloud.io/api/project_badges/measure?project=ApostolosBenisis_jest-performance-matchers&metric=reliability_rating)](https://sonarcloud.io/summary/new_code?id=ApostolosBenisis_jest-performance-matchers)
 
 ```
-                ┌───┐
-             ┌──┤   ├──┐
-             │  │   │  │
-          ┌──┤  │   │  ├──┐
-          │  │  │   │  │  ├──┐
-       ┌──┤  │  │   │  │  │  ├──┐
-       │  │  │  │   │  │  │  │  ├──┐
-    ┌──┤  │  │  │   │  │  │  │  │  ├────┐
-────┴──┴──┴──┴──┴───┴──┴──┴──┴──┴──┴────┴───────
-         jest-performance-matchers
-         Assert · Measure · Prove
+   ▂▅▇█▇▅▄▃▂▂▁▁▁
+   jest-performance-matchers
+   Assert · Measure · Prove
 ```
 
 Jest matchers for **statistically reliable** performance testing in Node.js. Measure code execution time over multiple iterations, assert on quantiles, and catch performance regressions in CI — all with zero dependencies.
