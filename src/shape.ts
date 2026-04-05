@@ -4,9 +4,10 @@ export interface ShapeDiagnostics {
 }
 
 function validateData(data: number[]): void {
-    if (!data || !Array.isArray(data) || data.length === 0) throw new Error("Data must be an array of numbers and must contain at least one element");
-    for (const v of data) {
-        if (!Number.isFinite(v)) throw new Error("Data must be an array of numbers and must contain at least one element");
+    if (!Array.isArray(data)) throw new Error("Data is required and must be an array");
+    if (data.length === 0) throw new Error("Data must contain at least one element");
+    for (let i = 0; i < data.length; i++) {
+        if (!Number.isFinite(data[i])) throw new Error(`Data must contain only finite numbers, but found ${String(data[i])} at index ${i}`);
     }
 }
 

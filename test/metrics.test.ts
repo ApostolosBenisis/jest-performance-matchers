@@ -31,16 +31,31 @@ describe("Test calcQuantile function", () => {
         ["undefined", undefined],
         ["null", null],
         ["not an array", "string"],
+    ])("should throw an error when data is %s (not an array)", (description, data) => {
+        // @ts-expect-error - intentionally passing invalid data for testing
+        expect(() => calcQuantile(50, data)).toThrowError(/Data is required and must be an array/);
+    });
+
+    test("should throw an error when data is an empty array", () => {
+        expect(() => calcQuantile(50, [])).toThrowError(/Data must contain at least one element/);
+    });
+
+    test.each([
         ["not an array of numbers", ["NaN", "0.2"]],
-        ["an empty array", []],
+        ["an array containing NaN", [1, NaN, 3]],
         ["an array containing Infinity", [1, Infinity, 3]],
         ["an array containing -Infinity", [1, -Infinity, 3]],
         // eslint-disable-next-line no-sparse-arrays
-        ["a sparse array", [1, , 3]]
-    ])("should throw an error when data is %s", (description, data) => {
+        ["a sparse array", [1, , 3]],
+    ])("should throw an error when data is %s (non-finite element)", (description, data) => {
         // @ts-expect-error - intentionally passing invalid data for testing
-        expect(() => calcQuantile(50, data)).toThrowError(/Data must be an array of numbers and must contain at least one element/);
+        expect(() => calcQuantile(50, data)).toThrowError(/Data must contain only finite numbers/);
     });
+
+    test("should report the correct index in the non-finite element error message", () => {
+        expect(() => calcQuantile(50, [1, NaN, 3])).toThrowError(/found NaN at index 1/);
+    });
+
     test.each([
         ["undefined", undefined],
         ["null", null],
@@ -93,16 +108,29 @@ describe("Test removeOutliers function", () => {
         ["undefined", undefined],
         ["null", null],
         ["not an array", "string"],
+    ])("should throw an error when data is %s (not an array)", (description, data) => {
+        // @ts-expect-error - intentionally passing invalid data for testing
+        expect(() => removeOutliers(data)).toThrowError(/Data is required and must be an array/);
+    });
+
+    test("should throw an error when data is an empty array", () => {
+        expect(() => removeOutliers([])).toThrowError(/Data must contain at least one element/);
+    });
+
+    test.each([
         ["not an array of numbers", ["1", "2", "3", "4"]],
-        ["an empty array", []],
         ["an array containing NaN", [1, NaN, 3, 4]],
         ["an array containing Infinity", [1, Infinity, 3, 4]],
         ["an array containing -Infinity", [1, -Infinity, 3, 4]],
         // eslint-disable-next-line no-sparse-arrays
         ["a sparse array", [1, , 3, 4]],
-    ])("should throw an error when data is %s", (description, data) => {
+    ])("should throw an error when data is %s (non-finite element)", (description, data) => {
         // @ts-expect-error - intentionally passing invalid data for testing
-        expect(() => removeOutliers(data)).toThrowError(/Data must be an array of numbers and must contain at least one element/);
+        expect(() => removeOutliers(data)).toThrowError(/Data must contain only finite numbers/);
+    });
+
+    test("should report the correct index in the non-finite element error message", () => {
+        expect(() => removeOutliers([10, 11, Infinity, 13])).toThrowError(/found Infinity at index 2/);
     });
 });
 
@@ -156,16 +184,29 @@ describe("Test calcStats function", () => {
         ["undefined", undefined],
         ["null", null],
         ["not an array", "string"],
+    ])("should throw an error when data is %s (not an array)", (description, data) => {
+        // @ts-expect-error - intentionally passing invalid data for testing
+        expect(() => calcStats(data)).toThrowError(/Data is required and must be an array/);
+    });
+
+    test("should throw an error when data is an empty array", () => {
+        expect(() => calcStats([])).toThrowError(/Data must contain at least one element/);
+    });
+
+    test.each([
         ["not an array of numbers", ["1", "2", "3", "4"]],
-        ["an empty array", []],
         ["an array containing NaN", [1, NaN, 3, 4]],
         ["an array containing Infinity", [1, Infinity, 3, 4]],
         ["an array containing -Infinity", [1, -Infinity, 3, 4]],
         // eslint-disable-next-line no-sparse-arrays
         ["a sparse array", [1, , 3, 4]],
-    ])("should throw an error when data is %s", (description, data) => {
+    ])("should throw an error when data is %s (non-finite element)", (description, data) => {
         // @ts-expect-error - intentionally passing invalid data for testing
-        expect(() => calcStats(data)).toThrowError(/Data must be an array of numbers and must contain at least one element/);
+        expect(() => calcStats(data)).toThrowError(/Data must contain only finite numbers/);
+    });
+
+    test("should report the correct index in the non-finite element error message", () => {
+        expect(() => calcStats([5, 10, -Infinity, 20])).toThrowError(/found -Infinity at index 2/);
     });
 
     test("should return null stddev and CI for a single value (n=1)", () => {

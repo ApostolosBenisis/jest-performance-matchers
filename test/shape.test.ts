@@ -8,16 +8,29 @@ describe("Test calcShapeDiagnostics function", () => {
             ["undefined", undefined],
             ["null", null],
             ["not an array", "string"],
+        ])("should throw an error when data is %s (not an array)", (description, data) => {
+            // @ts-expect-error - intentionally passing invalid data for testing
+            expect(() => calcShapeDiagnostics(data, null, null)).toThrowError(/Data is required and must be an array/);
+        });
+
+        test("should throw an error when data is an empty array", () => {
+            expect(() => calcShapeDiagnostics([], null, null)).toThrowError(/Data must contain at least one element/);
+        });
+
+        test.each([
             ["not an array of numbers", ["1", "2", "3"]],
-            ["an empty array", []],
             ["an array containing NaN", [1, NaN, 3]],
             ["an array containing Infinity", [1, Infinity, 3]],
             ["an array containing -Infinity", [1, -Infinity, 3]],
             // eslint-disable-next-line no-sparse-arrays
             ["a sparse array", [1, , 3]],
-        ])("should throw an error when data is %s", (description, data) => {
+        ])("should throw an error when data is %s (non-finite element)", (description, data) => {
             // @ts-expect-error - intentionally passing invalid data for testing
-            expect(() => calcShapeDiagnostics(data, null, null)).toThrowError(/Data must be an array of numbers and must contain at least one element/);
+            expect(() => calcShapeDiagnostics(data, null, null)).toThrowError(/Data must contain only finite numbers/);
+        });
+
+        test("should report the correct index in the non-finite element error message", () => {
+            expect(() => calcShapeDiagnostics([1, 2, NaN], null, null)).toThrowError(/found NaN at index 2/);
         });
     });
 
