@@ -11,7 +11,7 @@
     "clean": "rm -rf dist coverage",
     "compile": "tsc --build tsconfig.json",
     "build": "npm run clean && npm run compile",
-    "prepare-dist": "npm run build && cp package.json README.md dist/",
+    "prepare-dist": "npm run build && cp package.json README.md LICENSE CHANGELOG.md dist/",
     "lint": "eslint . --ext .ts",
     "test": "jest --coverage test/*"
   },
