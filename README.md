@@ -49,7 +49,8 @@ If you already have Jest tests, adding performance assertions takes one import a
 | **Outliers** | One GC pause fails the test | IQR-based outlier removal |
 | **Diagnostics** | You get a number | Mean, median, CI, percentiles, shape analysis, sparklines |
 | **Warmup** | DIY or forget about it | Built-in warmup iterations |
-| **Dependencies** | DIY everything | Zero deps — all math in-house |
+| **Statistics** | None built-in | Built-in — `calcStats`, `calcQuantile`, `removeOutliers` |
+| **Dependencies** | Grows with each addition | Zero — all math included |
 
 ## Why jest-performance-matchers?
 
