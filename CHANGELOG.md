@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.1] - 2026-04-06
+
+### Added
+- Actionable benchmark diagnostics in quantile matcher failure output: RME, CV, and sample-size adequacy classifiers (`GOOD`/`FAIR`/`POOR`) with threshold-aware interpretation and concrete remediation steps. New `src/diagnostics.ts` module. (Ref: #50)
+
+### Fixed
+- Validation errors now use distinct messages per failure mode — `not-an-array`, `empty-array`, and `non-finite-element` (with the offending value and index) — instead of a single generic message. Applies to `calcQuantile()`, `calcStats()`, `removeOutliers()`, and `calcShapeDiagnostics()`. (Ref: #48)
+- Corrected misleading Rule 3 comment in `calcShapeDiagnostics` that cited `n=2` (already caught by Rule 1). (Ref: #47)
+
+### Changed
+- Published npm package now includes `LICENSE` and `CHANGELOG.md`. (Ref: #66)
+
 ## [1.3.0] - 2026-04-04
 
 ### Added
