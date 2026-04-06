@@ -222,14 +222,15 @@ Statistics (n=50): mean=8.81ms, median=5.70ms, stddev=7.33ms
 Confidence Interval (CI): 95% [6.78, 10.85]ms
 Relative Margin of Error (RME): 23.05% [FAIR 10-30%]
 Coefficient of Variation (CV): 0.83 [POOR >0.3]
+Median Absolute Deviation (MAD): 2.22ms [POOR >0.3]
 Distribution: min=2.04ms | P25=4.21ms | P50=5.70ms | P75=11.52ms | P90=20.40ms | max=41.15ms
 Shape: right-skewed (skewness=2.26) | █▂▂▁▁▁
 Sample adequacy: GOOD >30 (n=50)
-Interpretation: mean is approximate and variance is high (RME: FAIR 10-30%,
-  CV: POOR >0.3) — increase iterations and investigate noise sources (GC, I/O,
-  scheduling). CI upper bound (10.85ms) exceeds your 10ms threshold — the true
-  mean likely exceeds your budget, consider optimizing the code or raising the
-  threshold
+Interpretation: mean is approximate and most runs vary widely (RME: FAIR 10-30%,
+  CV: POOR >0.3, MAD: POOR >0.3) — increase iterations and investigate
+  environment stability. CI upper bound (10.85ms) exceeds your 10ms threshold —
+  the true mean likely exceeds your budget, consider optimizing the code or
+  raising the threshold
 ```
 
 The diagnostics include:
@@ -237,10 +238,11 @@ The diagnostics include:
 - **Confidence Interval (CI)** — the range `[lower, upper]ms` where the true mean likely falls. Uses Student's t-distribution for n <= 30, z-distribution for n >= 31
 - **Relative Margin of Error (RME)** — margin of error as a percentage of the mean, with classification tag (`[GOOD <10%]`/`[FAIR 10-30%]`/`[POOR >30%]`)
 - **Coefficient of Variation (CV)** — standard deviation relative to the mean, with classification tag (`[GOOD <0.1]`/`[FAIR 0.1-0.3]`/`[POOR >0.3]`)
+- **Median Absolute Deviation (MAD)** — robust dispersion measure (median of absolute deviations from the median), with classification tag. When CV is POOR but MAD is LOW, outliers are inflating variance — the interpretation recommends enabling `outliers: 'remove'`
 - **Distribution percentiles** — min, P25, P50, P75, P90, max
 - **Distribution shape** — skewness value, shape classification (symmetric, left-skewed, right-skewed, bimodal, constant), and an ASCII sparkline histogram for at-a-glance visualization. Shape diagnostics are most reliable with n > 100; smaller samples produce noisier sparklines and less stable labels
 - **Sample adequacy** — classifies sample size as `POOR` (< 10), `FAIR` (10-30), or `GOOD` (> 30)
-- **Interpretation** — single-sentence summary of result reliability based on RME and sample size
+- **Interpretation** — single-sentence summary of result reliability based on the RME × CV × MAD matrix
 - **Warnings** — contextual alerts (e.g., small sample size, empty dataset)
 
 ### How to use each metric
@@ -263,18 +265,32 @@ The diagnostics include:
 | `[FAIR 0.1-0.3]` | 0.1–0.3 | Moderate variance — typical for I/O-bound code |
 | `[POOR >0.3]` | > 0.3 | High variance — runs differ by more than 30% of the mean |
 
+**MAD (Median Absolute Deviation)** — a robust measure of dispersion: `median(|xi - median(x)|)`. Unlike standard deviation, MAD has a 50% breakdown point — it is not inflated by outliers. It is normalized by the median (`MAD / |median|`) for classification.
+
+| MAD tag | Value | What it means |
+|---|---|---|
+| `[GOOD <0.1]` | < 0.1 | Low dispersion — most runs cluster tightly around the median |
+| `[FAIR 0.1-0.3]` | 0.1–0.3 | Moderate dispersion |
+| `[POOR >0.3]` | > 0.3 | High dispersion — runs are spread widely even by the robust measure |
+
+MAD is most useful when CV is POOR — it disambiguates the *cause* of high variance:
+- **CV POOR + MAD LOW** → a few extreme outliers are inflating stddev. Fix: enable `outliers: 'remove'`
+- **CV POOR + MAD HIGH** → runs are genuinely inconsistent. Fix: investigate noise sources (GC, I/O, scheduling)
+
 ### Reading them together
 
-The interpretation line combines RME, CV, and CI into a single recommendation:
+The interpretation line combines RME, CV, MAD, and CI into a single recommendation:
 
-| RME | CV | Interpretation |
-|-----|-----|----------------|
-| GOOD | GOOD | Precise and consistent — safe for regression detection |
-| GOOD | FAIR | Reliable — moderate run-to-run variance is expected |
-| GOOD | POOR | Precise mean but inconsistent runs — investigate noise sources |
-| FAIR | FAIR/GOOD | Usable for rough comparison — increase iterations for tighter estimates |
-| FAIR | POOR | Approximate mean + high variance — increase iterations and investigate noise |
-| POOR | any | Mean is not reliable — increase iterations, add warmup, or enable outlier removal |
+| RME | CV | MAD | Interpretation |
+|-----|-----|-----|----------------|
+| GOOD | GOOD | — | Precise and consistent — safe for regression detection |
+| GOOD | FAIR | — | Reliable — moderate run-to-run variance is expected |
+| GOOD | POOR | GOOD/FAIR | Precise mean but outliers inflating variance — enable outlier removal |
+| GOOD | POOR | POOR | Precise mean but genuinely inconsistent — investigate noise sources |
+| FAIR | FAIR/GOOD | — | Usable for rough comparison — increase iterations for tighter estimates |
+| FAIR | POOR | GOOD/FAIR | Approximate mean; outliers inflating variance — enable outlier removal + increase iterations |
+| FAIR | POOR | POOR | Approximate mean; runs genuinely inconsistent — increase iterations + investigate environment |
+| POOR | any | — | Mean is not reliable — increase iterations, add warmup, or enable outlier removal |
 
 When a CI bound is provided, the interpretation also checks whether the confidence interval exceeds your threshold — telling you if the true mean might exceed your performance budget.
 
@@ -383,6 +399,7 @@ The `Stats` interface returned by `calcStats()`:
 | `confidenceInterval` | `[number, number] \| null` | 95% CI [lower, upper] for the mean |
 | `coefficientOfVariation` | `number \| null` | CV (stddev / \|mean\|) |
 | `skewness` | `number \| null` | Sample skewness (adjusted Fisher-Pearson G1). `null` for n < 3 or stddev = 0 |
+| `mad` | `number \| null` | Median Absolute Deviation: `median(\|xi - median(x)\|)`. `null` for n = 1 |
 | `isSmallSample` | `boolean` | `true` when n <= 30 |
 | `confidenceMethod` | `"z" \| "t" \| null` | Distribution used for the CI |
 | `confidenceCriticalValue` | `number \| null` | Critical value used for the CI |

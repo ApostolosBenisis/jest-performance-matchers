@@ -1,7 +1,7 @@
 import '../src/main';
 import * as metrics from '../src/metrics';
 import {calcShapeDiagnostics} from '../src/shape';
-import {classifyRME, classifyCV, classifySampleAdequacy, generateInterpretation, formatTag} from '../src/diagnostics';
+import {classifyRME, classifyCV, classifyMAD, classifySampleAdequacy, generateInterpretation, formatTag} from '../src/diagnostics';
 import {printExpected, printReceived} from "jest-matcher-utils";
 
 
@@ -34,11 +34,17 @@ function buildStatsBlock(durations: number[], expectedDuration?: number): string
     const shapeDiag = calcShapeDiagnostics(durations, stats.skewness, stats.stddev);
     const skewnessText = stats.skewness === null ? 'N/A' : stats.skewness.toFixed(2);
 
+    const madTag = classifyMAD(stats.mad, stats.median);
+    const madText = stats.mad === null
+        ? 'Median Absolute Deviation (MAD): N/A'
+        : `Median Absolute Deviation (MAD): ${stats.mad.toFixed(2)}ms${madTag !== null ? ` [${formatTag(madTag)}]` : ''}`;
+
     const lines = [
         `Statistics (n=${stats.n}): mean=${fmt(stats.mean)}ms, median=${fmt(stats.median)}ms, stddev=${fmt(stats.stddev)}ms`,
         ciText,
         rmeText,
         cvText,
+        madText,
         `Distribution: min=${fmt(stats.min)}ms | P25=${fmt(p25)}ms | P50=${fmt(p50)}ms | P75=${fmt(p75)}ms | P90=${fmt(p90)}ms | max=${fmt(stats.max)}ms`,
         `Shape: ${shapeDiag.label} (skewness=${skewnessText}) | ${shapeDiag.sparkline}`,
         `Sample adequacy: ${formatTag(classifySampleAdequacy(stats.n))} (n=${stats.n})`,
@@ -612,8 +618,9 @@ describe("Benchmark log interpretability annotations", () => {
         expect(actualMessage).toContain('Interpretation: results are usable for rough comparison (RME: FAIR 10-30%, CV: FAIR 0.1-0.3)');
     });
 
-    test("should interpret as approximate with high variance when RME is FAIR and CV is POOR", () => {
-        // GIVEN durations with mocked FAIR RME (15%) and POOR CV (0.5)
+    test("should interpret as outlier-driven variance when RME is FAIR, CV is POOR, and MAD is LOW", () => {
+        // GIVEN durations with mocked FAIR RME (15%), POOR CV (0.5), and LOW MAD
+        // MAD=1, median=10 → normalized=0.1 → FAIR (not POOR) → outlier branch
         const givenDurations = [8, 9, 10, 11, 12];
         mockFunctionProcessTimes(givenDurations);
 
@@ -632,13 +639,14 @@ describe("Benchmark log interpretability annotations", () => {
             actualMessage = (e as Error).message;
         }
 
-        // THEN the interpretation flags both approximate mean and high variance
-        expect(actualMessage).toContain('Interpretation: mean is approximate and variance is high (RME: FAIR 10-30%, CV: POOR >0.3)');
-        expect(actualMessage).toContain('investigate noise sources');
+        // THEN the interpretation identifies outliers as the cause
+        expect(actualMessage).toContain('outliers are inflating variance');
+        expect(actualMessage).toContain('outlier removal');
     });
 
-    test("should interpret as precise but inconsistent when RME is GOOD and CV is POOR", () => {
-        // GIVEN 31 durations with mocked GOOD RME (5%) and POOR CV (0.5)
+    test("should interpret as outlier-driven variance when RME is GOOD, CV is POOR, and MAD is LOW", () => {
+        // GIVEN 31 durations with mocked GOOD RME (5%), POOR CV (0.5), and LOW MAD
+        // All identical → MAD=0, median=10, normalized=0 → GOOD → outlier branch
         const givenDurations = Array(31).fill(10);
         mockFunctionProcessTimes(givenDurations);
 
@@ -657,9 +665,9 @@ describe("Benchmark log interpretability annotations", () => {
             actualMessage = (e as Error).message;
         }
 
-        // THEN the interpretation flags inconsistent runs despite precise mean
-        expect(actualMessage).toContain('Interpretation: mean is precise but individual runs vary widely (RME: GOOD <10%, CV: POOR >0.3)');
-        expect(actualMessage).toContain('investigate noise sources');
+        // THEN the interpretation identifies outliers as the cause
+        expect(actualMessage).toContain('outliers are inflating variance');
+        expect(actualMessage).toContain('outlier removal');
     });
 
     test("should interpret as reliable when RME is GOOD and CV is FAIR", () => {
@@ -814,6 +822,7 @@ describe("Benchmark log interpretability annotations", () => {
         expect(actualMessage).not.toContain('[POOR');
         expect(actualMessage).toContain('Relative Margin of Error (RME): N/A');
         expect(actualMessage).toContain('Coefficient of Variation (CV): N/A');
+        expect(actualMessage).toContain('Median Absolute Deviation (MAD): N/A');
         const expectedSampleTag = formatTag(classifySampleAdequacy(givenDurations.length));
         expect(actualMessage).toContain(`Sample adequacy: ${expectedSampleTag} (n=${givenDurations.length})`);
         expect(actualMessage).toContain('Interpretation: results are unreliable');
@@ -871,6 +880,30 @@ describe("Benchmark log interpretability annotations", () => {
         expect(actualMessage).toContain('Relative Margin of Error (RME): N/A');
         expect(actualMessage).toContain('Coefficient of Variation (CV): N/A');
         expect(actualMessage).toContain('Interpretation: relative error cannot be computed');
+    });
+
+    test("should show MAD value without classification tag when median is zero", () => {
+        // GIVEN durations with mocked median=0 (classifyMAD returns null)
+        const givenDurations = [8, 9, 10, 11, 12];
+        mockFunctionProcessTimes(givenDurations);
+
+        const givenStats = metrics.calcStats(givenDurations);
+        jest.spyOn(metrics, 'calcStats').mockReturnValue({
+            ...givenStats,
+            median: 0,
+        });
+
+        // WHEN the quantile matcher fails
+        let actualMessage = '';
+        try {
+            expect(() => undefined).toCompleteWithinQuantile(0.001, {iterations: givenDurations.length, quantile: 1});
+        } catch (e) {
+            actualMessage = (e as Error).message;
+        }
+
+        // THEN MAD value is shown but without a classification tag
+        expect(actualMessage).toContain('Median Absolute Deviation (MAD): 1.00ms');
+        expect(actualMessage).not.toMatch(/Median Absolute Deviation \(MAD\): [\d.]+ms \[/);
     });
 });
 
