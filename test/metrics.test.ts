@@ -222,6 +222,7 @@ describe("Test calcStats function", () => {
         expect(stats.confidenceInterval).toBeNull();
         expect(stats.coefficientOfVariation).toBeNull();
         expect(stats.skewness).toBeNull();
+        expect(stats.mad).toBeNull();
         expect(stats.isSmallSample).toBe(true);
         expect(stats.confidenceMethod).toBeNull();
         expect(stats.confidenceCriticalValue).toBeNull();
@@ -263,12 +264,14 @@ describe("Test calcStats function", () => {
         expect(stats.confidenceMethod).toBe("t");
         // Skewness null when stddev is 0
         expect(stats.skewness).toBeNull();
+        expect(stats.mad).toBe(0);
     });
 
     test("should return null for RME and CV when mean is zero", () => {
         const data = [-2, -1, 0, 1, 2];
         const stats = calcStats(data);
         expect(stats.mean).toBe(0);
+        expect(stats.median).toBe(0);
         expect(stats.relativeMarginOfError).toBeNull();
         expect(stats.coefficientOfVariation).toBeNull();
         // Bessel's: variance = 10/4 = 2.5, stddev = sqrt(2.5)
@@ -276,6 +279,8 @@ describe("Test calcStats function", () => {
         // marginOfError and CI should still be computed
         expect(stats.marginOfError).not.toBeNull();
         expect(stats.confidenceInterval).not.toBeNull();
+        // MAD is computable (median=0, deviations=[2,1,0,1,2], sorted=[0,1,1,2,2], MAD=1)
+        expect(stats.mad).toBe(1);
     });
 
     test("should use t-distribution at n=29 boundary", () => {
@@ -352,5 +357,31 @@ describe("Test calcStats function", () => {
         const stats = calcStats([1, 2, 3, 4, 5]);
         expect(stats.skewness).not.toBeNull();
         expect(stats.skewness).toBe(0);
+    });
+
+    test("should calculate MAD for a simple dataset", () => {
+        // median=3, deviations=[2,1,0,1,2], sorted=[0,1,1,2,2], median of deviations=1
+        const stats = calcStats([1, 2, 3, 4, 5]);
+        expect(stats.mad).toBe(1);
+    });
+
+    test("should calculate MAD for n=2", () => {
+        // median=15, deviations=[5,5], sorted=[5,5], median of deviations=5
+        const stats = calcStats([10, 20]);
+        expect(stats.mad).toBe(5);
+    });
+
+    test("should calculate MAD for skewed data", () => {
+        // median=3, deviations=[2,1,1,0,0,0,7], sorted=[0,0,0,1,1,2,7], median at pos=3 → 1
+        const stats = calcStats([1, 2, 2, 3, 3, 3, 10]);
+        expect(stats.mad).toBe(1);
+    });
+
+    test("should calculate MAD for a large dataset (n=31)", () => {
+        // [1..31], median=16, deviations=[15,14,...,0,...,14,15], sorted=[0,1,...,15], median=8
+        const data = Array.from({length: 31}, (_, i) => i + 1);
+        const stats = calcStats(data);
+        expect(stats.mad).not.toBeNull();
+        expect(stats.mad).toBe(8);
     });
 });

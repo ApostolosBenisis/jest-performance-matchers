@@ -2,7 +2,7 @@ import {expect} from '@jest/globals';
 import {printReceived, printExpected} from 'jest-matcher-utils';
 import {calcQuantile, calcStats, removeOutliers, Stats} from "./metrics";
 import {calcShapeDiagnostics} from "./shape";
-import {classifyRME, classifyCV, classifySampleAdequacy, generateInterpretation, formatTag} from "./diagnostics";
+import {classifyRME, classifyCV, classifyMAD, classifySampleAdequacy, generateInterpretation, formatTag} from "./diagnostics";
 
 const nowInMillis = () => {
     const hrTime = process.hrtime();
@@ -170,11 +170,17 @@ function formatStatsBlock(stats: Stats, durations: number[], expectedDuration?: 
     const shapeDiag = calcShapeDiagnostics(durations, stats.skewness, stats.stddev);
     const skewnessText = stats.skewness === null ? 'N/A' : stats.skewness.toFixed(2);
 
+    const madTag = classifyMAD(stats.mad, stats.median);
+    const madText = stats.mad === null
+        ? 'Median Absolute Deviation (MAD): N/A'
+        : `Median Absolute Deviation (MAD): ${stats.mad.toFixed(2)}ms${madTag !== null ? ` [${formatTag(madTag)}]` : ''}`;
+
     const lines = [
         `Statistics (n=${stats.n}): mean=${formatStatValue(stats.mean)}ms, median=${formatStatValue(stats.median)}ms, stddev=${formatStatValue(stats.stddev)}ms`,
         ciText,
         rmeText,
         cvText,
+        madText,
         `Distribution: min=${formatStatValue(stats.min)}ms | P25=${formatStatValue(p25)}ms | P50=${formatStatValue(p50)}ms | P75=${formatStatValue(p75)}ms | P90=${formatStatValue(p90)}ms | max=${formatStatValue(stats.max)}ms`,
         `Shape: ${shapeDiag.label} (skewness=${skewnessText}) | ${shapeDiag.sparkline}`,
         `Sample adequacy: ${formatTag(classifySampleAdequacy(stats.n))} (n=${stats.n})`,

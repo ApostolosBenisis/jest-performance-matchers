@@ -1,5 +1,5 @@
 import {
-    classifyRME, classifyCV, classifySampleAdequacy,
+    classifyRME, classifyCV, classifyMAD, classifySampleAdequacy,
     generateInterpretation, formatTag, Tag
 } from '../src/diagnostics';
 import {Stats} from '../src/metrics';
@@ -177,13 +177,79 @@ describe("classifySampleAdequacy", () => {
     });
 });
 
+describe("classifyMAD", () => {
+    test("should return null when MAD is null", () => {
+        // GIVEN a null MAD value
+        const actualResult = classifyMAD(null, 10);
+
+        // THEN the result is null
+        expect(actualResult).toBeNull();
+    });
+
+    test("should return null when median is null", () => {
+        // GIVEN a null median
+        const actualResult = classifyMAD(1, null);
+
+        // THEN the result is null
+        expect(actualResult).toBeNull();
+    });
+
+    test("should return null when median is zero", () => {
+        // GIVEN a zero median (division undefined)
+        const actualResult = classifyMAD(1, 0);
+
+        // THEN the result is null
+        expect(actualResult).toBeNull();
+    });
+
+    test("should return GOOD when normalized MAD is below 0.1", () => {
+        // GIVEN MAD=0.4, median=10 → normalized MAD = 0.04
+        const actualResult = classifyMAD(0.4, 10);
+
+        // THEN the label is GOOD
+        expect(actualResult).toEqual({ label: 'GOOD', range: '<0.1' });
+    });
+
+    test("should return FAIR when normalized MAD is exactly 0.1", () => {
+        // GIVEN MAD=1, median=10 → normalized MAD = 0.1
+        const actualResult = classifyMAD(1, 10);
+
+        // THEN the label is FAIR
+        expect(actualResult!.label).toBe('FAIR');
+    });
+
+    test("should return FAIR when normalized MAD is 0.3", () => {
+        // GIVEN MAD=3, median=10 → normalized MAD = 0.3
+        const actualResult = classifyMAD(3, 10);
+
+        // THEN the label is still FAIR (inclusive)
+        expect(actualResult).toEqual({ label: 'FAIR', range: '0.1-0.3' });
+    });
+
+    test("should return POOR when normalized MAD exceeds 0.3", () => {
+        // GIVEN MAD=4, median=10 → normalized MAD = 0.4
+        const actualResult = classifyMAD(4, 10);
+
+        // THEN the label is POOR
+        expect(actualResult).toEqual({ label: 'POOR', range: '>0.3' });
+    });
+
+    test("should use absolute value of median for negative medians", () => {
+        // GIVEN MAD=0.4, median=-10 → normalized MAD = 0.04
+        const actualResult = classifyMAD(0.4, -10);
+
+        // THEN the label is GOOD (uses |median|)
+        expect(actualResult).toEqual({ label: 'GOOD', range: '<0.1' });
+    });
+});
+
 describe("generateInterpretation", () => {
     function buildStats(overrides: Partial<Stats>): Stats {
         return {
             n: 31, min: 1, max: 10, mean: 5, median: 5, stddev: 1,
             marginOfError: 0.35, relativeMarginOfError: 7.0,
             confidenceInterval: [4.65, 5.35],
-            coefficientOfVariation: 0.05, skewness: 0, isSmallSample: false,
+            coefficientOfVariation: 0.05, skewness: 0, mad: 1, isSmallSample: false,
             confidenceMethod: 'z', confidenceCriticalValue: 1.96, warnings: [],
             ...overrides,
         };
@@ -252,20 +318,66 @@ describe("generateInterpretation", () => {
         expect(actualResult).toContain('moderate run-to-run variance');
     });
 
-    test("should flag inconsistent runs when RME is GOOD and CV is POOR", () => {
-        // GIVEN stats with GOOD RME and POOR CV
-        const givenRME = 5.0;
-        const givenCV = 0.5;
+    test("should flag outlier-driven variance when RME is GOOD, CV is POOR, and MAD is LOW", () => {
+        // GIVEN stats with GOOD RME, POOR CV, and LOW MAD (normalized MAD < 0.1)
+        // MAD=0.4, median=5 → normalized=0.08 → GOOD (outliers inflating stddev)
         const givenStats = buildStats({
-            relativeMarginOfError: givenRME, coefficientOfVariation: givenCV,
+            relativeMarginOfError: 5.0, coefficientOfVariation: 0.5,
+            mad: 0.4, median: 5,
         });
 
         // WHEN generating interpretation
         const actualResult = generateInterpretation(givenStats);
 
-        // THEN it warns about inconsistent individual runs
-        expect(actualResult).toContain('precise but individual runs vary widely');
+        // THEN it identifies outliers as the cause and recommends removal
+        expect(actualResult).toContain('outliers are inflating variance');
+        expect(actualResult).toContain('outlier removal');
+    });
+
+    test("should flag genuine inconsistency when RME is GOOD, CV is POOR, and MAD is HIGH", () => {
+        // GIVEN stats with GOOD RME, POOR CV, and HIGH MAD (normalized MAD > 0.3)
+        // MAD=3, median=5 → normalized=0.6 → POOR (genuine inconsistency)
+        const givenStats = buildStats({
+            relativeMarginOfError: 5.0, coefficientOfVariation: 0.5,
+            mad: 3, median: 5,
+        });
+
+        // WHEN generating interpretation
+        const actualResult = generateInterpretation(givenStats);
+
+        // THEN it flags genuine inconsistency and recommends investigating noise
+        expect(actualResult).toContain('genuinely inconsistent');
         expect(actualResult).toContain('investigate noise sources');
+    });
+
+    test("should flag outlier-driven variance when RME is GOOD, CV is POOR, and MAD is FAIR", () => {
+        // GIVEN stats with GOOD RME, POOR CV, and FAIR MAD (not POOR → outlier branch)
+        // MAD=1, median=5 → normalized=0.2 → FAIR
+        const givenStats = buildStats({
+            relativeMarginOfError: 5.0, coefficientOfVariation: 0.5,
+            mad: 1, median: 5,
+        });
+
+        // WHEN generating interpretation
+        const actualResult = generateInterpretation(givenStats);
+
+        // THEN FAIR MAD also routes to the outlier branch (not-POOR means outliers are the likely cause)
+        expect(actualResult).toContain('outliers are inflating variance');
+        expect(actualResult).toContain('MAD: FAIR 0.1-0.3');
+    });
+
+    test("should flag genuine inconsistency when RME is GOOD, CV is POOR, and MAD is null", () => {
+        // GIVEN stats with GOOD RME, POOR CV, but MAD is null (median=0)
+        const givenStats = buildStats({
+            relativeMarginOfError: 5.0, coefficientOfVariation: 0.5,
+            mad: null, median: 0,
+        });
+
+        // WHEN generating interpretation
+        const actualResult = generateInterpretation(givenStats);
+
+        // THEN it falls through to the genuine inconsistency branch
+        expect(actualResult).toContain('genuinely inconsistent');
     });
 
     test("should return rough comparison when RME is FAIR and CV is FAIR", () => {
@@ -284,20 +396,53 @@ describe("generateInterpretation", () => {
         expect(actualResult).toContain('increase iterations');
     });
 
-    test("should flag double concern when RME is FAIR and CV is POOR", () => {
-        // GIVEN stats with FAIR RME and POOR CV
-        const givenRME = 15.0;
-        const givenCV = 0.5;
+    test("should flag outlier-driven variance when RME is FAIR, CV is POOR, and MAD is LOW", () => {
+        // GIVEN stats with FAIR RME, POOR CV, and LOW MAD
+        // MAD=0.4, median=5 → normalized=0.08 → GOOD
         const givenStats = buildStats({
-            relativeMarginOfError: givenRME, coefficientOfVariation: givenCV,
+            relativeMarginOfError: 15.0, coefficientOfVariation: 0.5,
+            mad: 0.4, median: 5,
         });
 
         // WHEN generating interpretation
         const actualResult = generateInterpretation(givenStats);
 
-        // THEN it flags both approximate mean and high variance
-        expect(actualResult).toContain('approximate and variance is high');
-        expect(actualResult).toContain('investigate noise sources');
+        // THEN it identifies outliers and recommends removal + more iterations
+        expect(actualResult).toContain('outliers are inflating variance');
+        expect(actualResult).toContain('outlier removal');
+        expect(actualResult).toContain('increase iterations');
+    });
+
+    test("should flag genuine wide variance when RME is FAIR, CV is POOR, and MAD is HIGH", () => {
+        // GIVEN stats with FAIR RME, POOR CV, and HIGH MAD
+        // MAD=3, median=5 → normalized=0.6 → POOR
+        const givenStats = buildStats({
+            relativeMarginOfError: 15.0, coefficientOfVariation: 0.5,
+            mad: 3, median: 5,
+        });
+
+        // WHEN generating interpretation
+        const actualResult = generateInterpretation(givenStats);
+
+        // THEN it flags genuine variance and recommends environment investigation
+        expect(actualResult).toContain('most runs vary widely');
+        expect(actualResult).toContain('investigate environment stability');
+        expect(actualResult).toContain('MAD: POOR >0.3');
+    });
+
+    test("should flag genuine wide variance when RME is FAIR, CV is POOR, and MAD is null", () => {
+        // GIVEN stats with FAIR RME, POOR CV, and null MAD (median=0)
+        const givenStats = buildStats({
+            relativeMarginOfError: 15.0, coefficientOfVariation: 0.5,
+            mad: null, median: 0,
+        });
+
+        // WHEN generating interpretation
+        const actualResult = generateInterpretation(givenStats);
+
+        // THEN it falls through to the genuine variance branch without MAD info
+        expect(actualResult).toContain('most runs vary widely');
+        expect(actualResult).not.toContain('MAD:');
     });
 
     test("should return not reliable with sample note when RME is POOR and sample is inadequate", () => {

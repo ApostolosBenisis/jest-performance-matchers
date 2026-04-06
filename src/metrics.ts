@@ -61,6 +61,8 @@ export interface Stats {
     coefficientOfVariation: number | null;
     /** Sample skewness (adjusted Fisher-Pearson G1). null when n < 3 or stddev is 0. */
     skewness: number | null;
+    /** Median Absolute Deviation: median(|xi - median(x)|). null when n = 1 (single data point). */
+    mad: number | null;
     /** true when n <= 30 */
     isSmallSample: boolean;
     /** The method used for the confidence interval: "z" (normal), "t" (Student's t), or null. */
@@ -125,7 +127,7 @@ export function calcStats(data: number[]): Stats {
         return {
             n, min, max, mean, median, stddev: null,
             marginOfError: null, relativeMarginOfError: null, confidenceInterval: null,
-            coefficientOfVariation: null, skewness: null, isSmallSample, confidenceMethod: null,
+            coefficientOfVariation: null, skewness: null, mad: null, isSmallSample, confidenceMethod: null,
             confidenceCriticalValue: null, warnings
         };
     }
@@ -147,9 +149,11 @@ export function calcStats(data: number[]): Stats {
         skewness = (n / ((n - 1) * (n - 2))) * sumCubedDeviations;
     }
 
+    const mad = calcQuantileOnSorted(0.5, data.map(v => Math.abs(v - median)).sort((a, b) => a - b));
+
     return {
         n, min, max, mean, median, stddev, marginOfError, relativeMarginOfError,
-        confidenceInterval, coefficientOfVariation, skewness, isSmallSample, confidenceMethod,
+        confidenceInterval, coefficientOfVariation, skewness, mad, isSmallSample, confidenceMethod,
         confidenceCriticalValue, warnings
     };
 }
