@@ -39,7 +39,7 @@ If you already have Jest tests, adding performance assertions takes one import a
 | **Accuracy** | ~1ms resolution | Sub-millisecond (`process.hrtime()`) |
 | **Flakiness** | Single run = noisy result | Multiple iterations + quantiles = stable |
 | **Outliers** | One GC pause fails the test | IQR-based outlier removal |
-| **Diagnostics** | You get a number | Mean, median, CI, percentiles, shape analysis, sparklines |
+| **Diagnostics** | You get a number | Mean, median, CI, percentiles, shape, sparklines, and actionable guidance |
 | **Warmup** | DIY or forget about it | Built-in warmup iterations |
 | **Statistics** | None built-in | Built-in — mean, CI, quantiles, outlier detection |
 | **Dependencies** | Grows with each need — more code to trust | Zero — nothing to audit, nothing to break |
@@ -49,7 +49,7 @@ If you already have Jest tests, adding performance assertions takes one import a
 - **Zero dependencies** — lightweight and safe to add; all statistics implemented in-house
 - **Full TypeScript support** — type declarations included, works seamlessly with `ts-jest`
 - **High-resolution timing** — `process.hrtime()` for sub-millisecond accuracy
-- **Statistical rigor** — 95% confidence intervals (Student's t / z), IQR outlier detection, skewness analysis, distribution shape classification, and rich diagnostics on failure
+- **Statistical rigor** — 95% confidence intervals (Student's t / z), IQR outlier detection, skewness analysis, distribution shape classification, quality tags, sample adequacy labels, and interpretive guidance on failure
 - **Warmup iterations** — exclude JIT compilation and cache warming from measurements
 - **Exported utilities** — use `calcStats()`, `calcQuantile()`, and `removeOutliers()` directly in your own code
 
@@ -214,24 +214,76 @@ await expect(async () => {
 When a quantile matcher fails, it outputs rich diagnostics to help you understand your performance profile:
 
 ```
-expected that 95% of the time when running 100 iterations,
-the function duration to be less or equal to 5 (ms),
-instead it was 8.34 (ms)
+expected that 95% of the time when running 50 iterations,
+the function duration to be less or equal to 10 (ms),
+instead it was 21.43 (ms)
 
-Statistics (n=100): mean=6.12ms, median=5.87ms, stddev=2.45ms
-95% CI: [5.63, 6.61]ms | RME: 7.99% | CV: 0.40
-Distribution: min=2.10ms | P25=4.50ms | P50=5.87ms | P75=7.20ms | P90=8.10ms | max=15.30ms
-Shape: right-skewed (skewness=0.85) | ▁▃▇█▅▃▂▁▁▁
+Statistics (n=50): mean=8.81ms, median=5.70ms, stddev=7.33ms
+Confidence Interval (CI): 95% [6.78, 10.85]ms
+Relative Margin of Error (RME): 23.05% [FAIR 10-30%]
+Coefficient of Variation (CV): 0.83 [POOR >0.3]
+Distribution: min=2.04ms | P25=4.21ms | P50=5.70ms | P75=11.52ms | P90=20.40ms | max=41.15ms
+Shape: right-skewed (skewness=2.26) | █▂▂▁▁▁
+Sample adequacy: GOOD >30 (n=50)
+Interpretation: mean is approximate and variance is high (RME: FAIR 10-30%,
+  CV: POOR >0.3) — increase iterations and investigate noise sources (GC, I/O,
+  scheduling). CI upper bound (10.85ms) exceeds your 10ms threshold — the true
+  mean likely exceeds your budget, consider optimizing the code or raising the
+  threshold
 ```
 
 The diagnostics include:
 - **Summary statistics** — mean, median, standard deviation, sample size
-- **95% confidence interval** — uses Student's t-distribution for n <= 30, z-distribution for n >= 31
-- **RME (Relative Margin of Error)** — margin of error as a percentage of the mean
-- **CV (Coefficient of Variation)** — standard deviation relative to the mean
+- **Confidence Interval (CI)** — the range `[lower, upper]ms` where the true mean likely falls. Uses Student's t-distribution for n <= 30, z-distribution for n >= 31
+- **Relative Margin of Error (RME)** — margin of error as a percentage of the mean, with classification tag (`[GOOD <10%]`/`[FAIR 10-30%]`/`[POOR >30%]`)
+- **Coefficient of Variation (CV)** — standard deviation relative to the mean, with classification tag (`[GOOD <0.1]`/`[FAIR 0.1-0.3]`/`[POOR >0.3]`)
 - **Distribution percentiles** — min, P25, P50, P75, P90, max
 - **Distribution shape** — skewness value, shape classification (symmetric, left-skewed, right-skewed, bimodal, constant), and an ASCII sparkline histogram for at-a-glance visualization. Shape diagnostics are most reliable with n > 100; smaller samples produce noisier sparklines and less stable labels
+- **Sample adequacy** — classifies sample size as `POOR` (< 10), `FAIR` (10-30), or `GOOD` (> 30)
+- **Interpretation** — single-sentence summary of result reliability based on RME and sample size
 - **Warnings** — contextual alerts (e.g., small sample size, empty dataset)
+
+### How to use each metric
+
+**95% Confidence Interval (CI)** — the range `[lower, upper]ms` where the true average execution time likely falls. If your performance budget is 50ms, check that the CI upper bound is below 50ms. If the upper bound is 55ms, there's a real chance the code is too slow even if the measured mean looks fine. The interpretation line will flag this automatically.
+
+**RME (Relative Margin of Error)** — how much the mean might shift if you ran the benchmark again. A low RME means you can trust the mean; a high RME means you need more data.
+
+| RME tag | Value | What it means |
+|---|---|---|
+| `[GOOD <10%]` | < 10% | Mean is stable — small regressions are detectable |
+| `[FAIR 10-30%]` | 10–30% | Mean is approximate — only large regressions are detectable |
+| `[POOR >30%]` | > 30% | Mean is unreliable — you need more iterations |
+
+**CV (Coefficient of Variation)** — how consistent individual runs are, independent of the mean. Even with a precise mean (GOOD RME), a POOR CV means some runs are much slower than others. Investigate warmup, GC pauses, or I/O contention.
+
+| CV tag | Value | What it means |
+|---|---|---|
+| `[GOOD <0.1]` | < 0.1 | Very consistent — low run-to-run variance |
+| `[FAIR 0.1-0.3]` | 0.1–0.3 | Moderate variance — typical for I/O-bound code |
+| `[POOR >0.3]` | > 0.3 | High variance — runs differ by more than 30% of the mean |
+
+### Reading them together
+
+The interpretation line combines RME, CV, and CI into a single recommendation:
+
+| RME | CV | Interpretation |
+|-----|-----|----------------|
+| GOOD | GOOD | Precise and consistent — safe for regression detection |
+| GOOD | FAIR | Reliable — moderate run-to-run variance is expected |
+| GOOD | POOR | Precise mean but inconsistent runs — investigate noise sources |
+| FAIR | FAIR/GOOD | Usable for rough comparison — increase iterations for tighter estimates |
+| FAIR | POOR | Approximate mean + high variance — increase iterations and investigate noise |
+| POOR | any | Mean is not reliable — increase iterations, add warmup, or enable outlier removal |
+
+When a CI bound is provided, the interpretation also checks whether the confidence interval exceeds your threshold — telling you if the true mean might exceed your performance budget.
+
+**When you see `[POOR]` tags**, try these in order:
+
+1. **Increase iterations** — more data reduces RME and stabilizes the CI
+2. **Add warmup iterations** — exclude JIT and cache effects that inflate CV
+3. **Enable outlier removal** (`outliers: 'remove'`) — filter GC pauses that inflate CV
+4. **Widen your threshold** — accept that the code path has inherent variance
 
 ## Test stability / CI notes
 

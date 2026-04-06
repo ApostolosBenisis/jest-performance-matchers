@@ -1,6 +1,7 @@
 import '../src/main';
 import * as metrics from '../src/metrics';
 import {calcShapeDiagnostics} from '../src/shape';
+import {classifyRME, classifyCV, classifySampleAdequacy, generateInterpretation, formatTag} from '../src/diagnostics';
 import {printExpected, printReceived} from "jest-matcher-utils";
 
 
@@ -8,15 +9,22 @@ function mockFunctionProcessTime(milliseconds: number) {
     mockFunctionProcessTimes([milliseconds]);
 }
 
-function buildStatsBlock(durations: number[]): string {
+function buildStatsBlock(durations: number[], expectedDuration?: number): string {
     const stats = metrics.calcStats(durations);
     const fmt = (v: number | null) => v !== null ? v.toFixed(2) : 'N/A';
 
+    const rmeTag = classifyRME(stats.relativeMarginOfError);
+    const cvTag = classifyCV(stats.coefficientOfVariation);
+
     const ciText = stats.confidenceInterval === null
-        ? '95% CI: N/A (insufficient data)'
-        : `95% CI: [${stats.confidenceInterval[0].toFixed(2)}, ${stats.confidenceInterval[1].toFixed(2)}]ms`;
-    const rmeText = `RME: ${stats.relativeMarginOfError === null ? 'N/A' : stats.relativeMarginOfError.toFixed(2) + '%'}`;
-    const cvText = `CV: ${stats.coefficientOfVariation === null ? 'N/A' : stats.coefficientOfVariation.toFixed(2)}`;
+        ? 'Confidence Interval (CI): N/A (insufficient data)'
+        : `Confidence Interval (CI): 95% [${stats.confidenceInterval[0].toFixed(2)}, ${stats.confidenceInterval[1].toFixed(2)}]ms`;
+    const rmeText = stats.relativeMarginOfError === null
+        ? 'Relative Margin of Error (RME): N/A'
+        : `Relative Margin of Error (RME): ${stats.relativeMarginOfError.toFixed(2)}% [${formatTag(rmeTag!)}]`;
+    const cvText = stats.coefficientOfVariation === null
+        ? 'Coefficient of Variation (CV): N/A'
+        : `Coefficient of Variation (CV): ${stats.coefficientOfVariation.toFixed(2)} [${formatTag(cvTag!)}]`;
 
     const p25 = metrics.calcQuantile(25, durations);
     const p50 = stats.median;
@@ -28,9 +36,13 @@ function buildStatsBlock(durations: number[]): string {
 
     const lines = [
         `Statistics (n=${stats.n}): mean=${fmt(stats.mean)}ms, median=${fmt(stats.median)}ms, stddev=${fmt(stats.stddev)}ms`,
-        `${ciText} | ${rmeText} | ${cvText}`,
+        ciText,
+        rmeText,
+        cvText,
         `Distribution: min=${fmt(stats.min)}ms | P25=${fmt(p25)}ms | P50=${fmt(p50)}ms | P75=${fmt(p75)}ms | P90=${fmt(p90)}ms | max=${fmt(stats.max)}ms`,
         `Shape: ${shapeDiag.label} (skewness=${skewnessText}) | ${shapeDiag.sparkline}`,
+        `Sample adequacy: ${formatTag(classifySampleAdequacy(stats.n))} (n=${stats.n})`,
+        `Interpretation: ${generateInterpretation(stats, expectedDuration)}`,
     ];
 
     if (stats.warnings.length > 0) {
@@ -209,7 +221,7 @@ describe("Test jest expect.toCompleteWithinQuantile assertion", () => {
         // WHEN asserting that (Q%) of the times when running for (I) iterations, the function will complete in (T) - 1 milliseconds
         // THEN expect to fail
         const Q = 1;
-        const expectedStatsBlock = buildStatsBlock(T_Array);
+        const expectedStatsBlock = buildStatsBlock(T_Array, T - 1);
 
         expect(() => {
             expect(() => undefined).toCompleteWithinQuantile(T - 1, {iterations: I, quantile: Q});
@@ -223,7 +235,7 @@ describe("Test jest expect.toCompleteWithinQuantile assertion", () => {
 
         // WHEN asserting with iterations=1 and it fails
         // THEN the stats block should show N/A for stddev (n=1 cannot compute stddev)
-        const expectedStatsBlock = buildStatsBlock([T]);
+        const expectedStatsBlock = buildStatsBlock([T], T - 1);
         expect(expectedStatsBlock).toContain("stddev=N/A");
 
         expect(() => {
@@ -241,7 +253,7 @@ describe("Test jest expect.toCompleteWithinQuantile assertion", () => {
         // WHEN asserting that (Q%) of the times when running for (I) iterations, the function will complete in (T) milliseconds
         // THEN expect to fail
         const Q = 1;
-        const expectedStatsBlock = buildStatsBlock(T_Array);
+        const expectedStatsBlock = buildStatsBlock(T_Array, T);
 
         expect(() => {
             expect(() => undefined).not.toCompleteWithinQuantile(T, {iterations: I, quantile: Q});
@@ -343,7 +355,7 @@ describe("Test jest expect.toCompleteWithinQuantile assertion", () => {
         }
 
         // THEN the message should indicate CI is unavailable
-        expect(errorMessage).toContain('95% CI: N/A (insufficient data)');
+        expect(errorMessage).toContain('Confidence Interval (CI): N/A (insufficient data)');
         // AND warnings should be present
         expect(errorMessage).toContain('Warnings:');
         expect(errorMessage).toContain('Single data point: standard deviation and confidence interval cannot be computed');
@@ -429,8 +441,8 @@ describe("Test jest expect.toCompleteWithinQuantile assertion", () => {
         }
 
         // THEN RME and CV should show N/A
-        expect(errorMessage).toContain('RME: N/A');
-        expect(errorMessage).toContain('CV: N/A');
+        expect(errorMessage).toContain('Relative Margin of Error (RME): N/A');
+        expect(errorMessage).toContain('Coefficient of Variation (CV): N/A');
     });
 
     test("Should show Shape line in failure message", () => {
@@ -513,6 +525,353 @@ describe("Test jest expect.toCompleteWithinQuantile assertion", () => {
         expect(errorMessage).toContain('Shape: right-skewed');
         expect(errorMessage).toContain('skewness=');
     });
+
+    test("README example: realistic API latency P95 at 10ms budget (n=50)", () => {
+        // GIVEN realistic right-skewed API latency durations (same data as above)
+        const givenDurations = [15.75,4.44,13.11,7.87,13.56,5.89,5.67,15.54,21.76,3.34,8.35,7.41,10.11,21.03,5.05,4.16,7.01,6.7,4.64,4.51,13.53,3.14,41.15,20.43,9.87,3.86,4.2,5.5,3.48,7.92,3.63,3.09,4.25,5,3.74,3.17,4.61,3.21,20.4,2.04,3.17,5.05,12.82,9.98,4.44,5.74,5.02,7.24,11.99,23.17];
+        const givenThreshold = 10;
+        const givenQuantile = 95;
+        mockFunctionProcessTimes(givenDurations);
+
+        // WHEN asserting P95 should be within 10ms budget and it fails
+        let actualMessage = '';
+        try {
+            expect(() => undefined).toCompleteWithinQuantile(givenThreshold, {iterations: givenDurations.length, quantile: givenQuantile});
+        } catch (e) {
+            actualMessage = (e as Error).message;
+        }
+
+        // THEN the output is a realistic failure diagnostic
+        // eslint-disable-next-line no-console
+        console.log(`\n--- README example (P${givenQuantile} at ${givenThreshold}ms, n=${givenDurations.length}) ---\n${actualMessage}\n`);
+        expect(actualMessage).toContain(`expected that ${givenQuantile}% of the time`);
+        expect(actualMessage).toContain('Confidence Interval (CI):');
+        expect(actualMessage).toContain('Relative Margin of Error (RME):');
+        expect(actualMessage).toContain('Coefficient of Variation (CV):');
+        expect(actualMessage).toContain('Sample adequacy:');
+        expect(actualMessage).toContain('Interpretation:');
+    });
+});
+
+describe("Benchmark log interpretability annotations", () => {
+    beforeEach(() => {
+        jest.restoreAllMocks();
+    });
+
+    function getFailureMessage(durations: number[]): string {
+        mockFunctionProcessTimes(durations);
+        let errorMessage = '';
+        try {
+            expect(() => undefined).toCompleteWithinQuantile(0.001, {iterations: durations.length, quantile: 1});
+        } catch (e) {
+            errorMessage = (e as Error).message;
+        }
+        return errorMessage;
+    }
+
+    test("should interpret as precise and consistent when RME is GOOD and CV is GOOD", () => {
+        // GIVEN 31 identical durations producing GOOD RME and GOOD CV
+        const givenDurations = Array(31).fill(10);
+
+        // WHEN the quantile matcher fails
+        const actualMessage = getFailureMessage(givenDurations);
+
+        // THEN the output shows GOOD tags and safe-for-regression interpretation
+        const expectedSampleTag = formatTag(classifySampleAdequacy(givenDurations.length));
+        expect(actualMessage).toContain('[GOOD <10%]');
+        expect(actualMessage).toContain(`Sample adequacy: ${expectedSampleTag} (n=${givenDurations.length})`);
+        expect(actualMessage).toContain('Interpretation: results are precise and consistent (RME: GOOD <10%');
+        expect(actualMessage).toContain('safe for regression detection');
+    });
+
+    test("should interpret as rough comparison when RME is FAIR and CV is FAIR", () => {
+        // GIVEN durations with mocked FAIR RME (15%) and FAIR CV (0.2)
+        const givenDurations = [8, 9, 10, 11, 12];
+        mockFunctionProcessTimes(givenDurations);
+
+        const givenStats = metrics.calcStats(givenDurations);
+        jest.spyOn(metrics, 'calcStats').mockReturnValue({
+            ...givenStats,
+            relativeMarginOfError: 15.0,
+            coefficientOfVariation: 0.2,
+        });
+
+        // WHEN the quantile matcher fails
+        let actualMessage = '';
+        try {
+            expect(() => undefined).toCompleteWithinQuantile(0.001, {iterations: givenDurations.length, quantile: 1});
+        } catch (e) {
+            actualMessage = (e as Error).message;
+        }
+
+        // THEN the output shows FAIR tags and rough-comparison interpretation
+        const expectedSampleTag = formatTag(classifySampleAdequacy(givenDurations.length));
+        expect(actualMessage).toContain('Relative Margin of Error (RME): 15.00% [FAIR 10-30%]');
+        expect(actualMessage).toContain('Coefficient of Variation (CV): 0.20 [FAIR 0.1-0.3]');
+        expect(actualMessage).toContain(`Sample adequacy: ${expectedSampleTag} (n=${givenDurations.length})`);
+        expect(actualMessage).toContain('Interpretation: results are usable for rough comparison (RME: FAIR 10-30%, CV: FAIR 0.1-0.3)');
+    });
+
+    test("should interpret as approximate with high variance when RME is FAIR and CV is POOR", () => {
+        // GIVEN durations with mocked FAIR RME (15%) and POOR CV (0.5)
+        const givenDurations = [8, 9, 10, 11, 12];
+        mockFunctionProcessTimes(givenDurations);
+
+        const givenStats = metrics.calcStats(givenDurations);
+        jest.spyOn(metrics, 'calcStats').mockReturnValue({
+            ...givenStats,
+            relativeMarginOfError: 15.0,
+            coefficientOfVariation: 0.5,
+        });
+
+        // WHEN the quantile matcher fails
+        let actualMessage = '';
+        try {
+            expect(() => undefined).toCompleteWithinQuantile(0.001, {iterations: givenDurations.length, quantile: 1});
+        } catch (e) {
+            actualMessage = (e as Error).message;
+        }
+
+        // THEN the interpretation flags both approximate mean and high variance
+        expect(actualMessage).toContain('Interpretation: mean is approximate and variance is high (RME: FAIR 10-30%, CV: POOR >0.3)');
+        expect(actualMessage).toContain('investigate noise sources');
+    });
+
+    test("should interpret as precise but inconsistent when RME is GOOD and CV is POOR", () => {
+        // GIVEN 31 durations with mocked GOOD RME (5%) and POOR CV (0.5)
+        const givenDurations = Array(31).fill(10);
+        mockFunctionProcessTimes(givenDurations);
+
+        const givenStats = metrics.calcStats(givenDurations);
+        jest.spyOn(metrics, 'calcStats').mockReturnValue({
+            ...givenStats,
+            relativeMarginOfError: 5.0,
+            coefficientOfVariation: 0.5,
+        });
+
+        // WHEN the quantile matcher fails
+        let actualMessage = '';
+        try {
+            expect(() => undefined).toCompleteWithinQuantile(0.001, {iterations: givenDurations.length, quantile: 1});
+        } catch (e) {
+            actualMessage = (e as Error).message;
+        }
+
+        // THEN the interpretation flags inconsistent runs despite precise mean
+        expect(actualMessage).toContain('Interpretation: mean is precise but individual runs vary widely (RME: GOOD <10%, CV: POOR >0.3)');
+        expect(actualMessage).toContain('investigate noise sources');
+    });
+
+    test("should interpret as reliable when RME is GOOD and CV is FAIR", () => {
+        // GIVEN 31 durations with mocked GOOD RME (5%) and FAIR CV (0.2)
+        const givenDurations = Array(31).fill(10);
+        mockFunctionProcessTimes(givenDurations);
+
+        const givenStats = metrics.calcStats(givenDurations);
+        jest.spyOn(metrics, 'calcStats').mockReturnValue({
+            ...givenStats,
+            relativeMarginOfError: 5.0,
+            coefficientOfVariation: 0.2,
+        });
+
+        // WHEN the quantile matcher fails
+        let actualMessage = '';
+        try {
+            expect(() => undefined).toCompleteWithinQuantile(0.001, {iterations: givenDurations.length, quantile: 1});
+        } catch (e) {
+            actualMessage = (e as Error).message;
+        }
+
+        // THEN the interpretation confirms reliability with expected moderate variance
+        expect(actualMessage).toContain('Interpretation: results are reliable (RME: GOOD <10%, CV: FAIR 0.1-0.3)');
+        expect(actualMessage).toContain('moderate run-to-run variance is expected');
+    });
+
+    test("should include sample size note when RME is POOR and sample is inadequate", () => {
+        // GIVEN 5 high-variance durations producing POOR RME and POOR sample adequacy
+        const givenDurations = [5, 10, 15, 20, 25];
+
+        // WHEN the quantile matcher fails
+        const actualMessage = getFailureMessage(givenDurations);
+
+        // THEN the interpretation mentions POOR sample size and remediation
+        const expectedSampleTag = formatTag(classifySampleAdequacy(givenDurations.length));
+        expect(actualMessage).toContain('[POOR >30%]');
+        expect(actualMessage).toContain(`Sample adequacy: ${expectedSampleTag} (n=${givenDurations.length})`);
+        expect(actualMessage).toContain('Interpretation: mean is not reliable (RME: POOR >30%, CV:');
+        expect(actualMessage).toContain('POOR sample size');
+        expect(actualMessage).toContain('try increasing iterations');
+    });
+
+    test("should not include sample size note when RME is POOR but sample is adequate", () => {
+        // GIVEN 31 durations with mocked POOR RME (40%) and POOR CV (0.5)
+        const givenDurations = Array(31).fill(10);
+        mockFunctionProcessTimes(givenDurations);
+
+        const givenStats = metrics.calcStats(givenDurations);
+        jest.spyOn(metrics, 'calcStats').mockReturnValue({
+            ...givenStats,
+            relativeMarginOfError: 40.0,
+            coefficientOfVariation: 0.5,
+            isSmallSample: false,
+        });
+
+        // WHEN the quantile matcher fails
+        let actualMessage = '';
+        try {
+            expect(() => undefined).toCompleteWithinQuantile(0.001, {iterations: givenDurations.length, quantile: 1});
+        } catch (e) {
+            actualMessage = (e as Error).message;
+        }
+
+        // THEN the interpretation omits sample size note for adequate samples
+        const expectedSampleTag = formatTag(classifySampleAdequacy(givenDurations.length));
+        expect(actualMessage).toContain('[POOR >30%]');
+        expect(actualMessage).toContain(`Sample adequacy: ${expectedSampleTag} (n=${givenDurations.length})`);
+        expect(actualMessage).toContain('Interpretation: mean is not reliable (RME: POOR >30%, CV: POOR >0.3)');
+        expect(actualMessage).toContain('try increasing iterations');
+        expect(actualMessage).not.toContain('sample size');
+    });
+
+    test("should note CI upper bound exceeds threshold when lower bound is within budget", () => {
+        // GIVEN durations with mocked CI [5.0, 15.0] and a threshold of 8ms
+        const givenDurations = [8, 9, 10, 11, 12];
+        mockFunctionProcessTimes(givenDurations);
+
+        const givenCILower = 5.0;
+        const givenCIUpper = 15.0;
+        const givenStats = metrics.calcStats(givenDurations);
+        jest.spyOn(metrics, 'calcStats').mockReturnValue({
+            ...givenStats,
+            confidenceInterval: [givenCILower, givenCIUpper] as [number, number],
+            relativeMarginOfError: 50.0,
+            coefficientOfVariation: 0.5,
+        });
+        const givenThreshold = 8;
+
+        // WHEN the quantile matcher fails (Q1=8.04 > 8ms)
+        let actualMessage = '';
+        try {
+            expect(() => undefined).toCompleteWithinQuantile(givenThreshold, {iterations: givenDurations.length, quantile: 1});
+        } catch (e) {
+            actualMessage = (e as Error).message;
+        }
+
+        // THEN the interpretation notes the CI upper bound exceeds the budget
+        const expectedUpperBound = givenCIUpper.toFixed(2);
+        expect(actualMessage).toContain(`CI upper bound (${expectedUpperBound}ms) exceeds your ${givenThreshold}ms threshold`);
+        expect(actualMessage).toContain('consider optimizing the code or raising the threshold');
+    });
+
+    test("should note CI is safely within budget when upper bound is below threshold", () => {
+        // GIVEN 31 identical durations (mean=10, CI≈[10,10]) and a generous threshold of 100ms
+        const givenDurations = Array(31).fill(10);
+        mockFunctionProcessTimes(givenDurations);
+        const givenThreshold = 100;
+
+        // WHEN the .not quantile matcher fails (quantile <= threshold, so .not throws)
+        let actualMessage = '';
+        try {
+            expect(() => undefined).not.toCompleteWithinQuantile(givenThreshold, {iterations: givenDurations.length, quantile: 1});
+        } catch (e) {
+            actualMessage = (e as Error).message;
+        }
+
+        // THEN the interpretation confirms the CI is within budget
+        expect(actualMessage).toContain('safely within budget');
+    });
+
+    test("should note CI is entirely above threshold when lower bound exceeds budget", () => {
+        // GIVEN durations with mean≈102 and a threshold of 1ms
+        const givenDurations = [100, 101, 102, 103, 104];
+        mockFunctionProcessTimes(givenDurations);
+        const givenThreshold = 1;
+
+        // WHEN the quantile matcher fails
+        let actualMessage = '';
+        try {
+            expect(() => undefined).toCompleteWithinQuantile(givenThreshold, {iterations: givenDurations.length, quantile: 1});
+        } catch (e) {
+            actualMessage = (e as Error).message;
+        }
+
+        // THEN the interpretation flags the code as almost certainly too slow
+        expect(actualMessage).toContain(`entirely above your ${givenThreshold}ms threshold`);
+        expect(actualMessage).toContain('almost certainly too slow');
+    });
+
+    test("should show no tags when CI is null (n=1)", () => {
+        // GIVEN a single duration producing null CI, RME, and CV
+        const givenDurations = [10];
+
+        // WHEN the quantile matcher fails
+        const actualMessage = getFailureMessage(givenDurations);
+
+        // THEN no classification tags appear and interpretation says unreliable
+        expect(actualMessage).toContain('Confidence Interval (CI): N/A (insufficient data)');
+        expect(actualMessage).not.toContain('[GOOD');
+        expect(actualMessage).not.toContain('[FAIR');
+        expect(actualMessage).not.toContain('[POOR');
+        expect(actualMessage).toContain('Relative Margin of Error (RME): N/A');
+        expect(actualMessage).toContain('Coefficient of Variation (CV): N/A');
+        const expectedSampleTag = formatTag(classifySampleAdequacy(givenDurations.length));
+        expect(actualMessage).toContain(`Sample adequacy: ${expectedSampleTag} (n=${givenDurations.length})`);
+        expect(actualMessage).toContain('Interpretation: results are unreliable');
+    });
+
+    test("should show FAIR sample adequacy when n=10", () => {
+        // GIVEN 10 identical durations
+        const givenDurations = Array(10).fill(10);
+
+        // WHEN the quantile matcher fails
+        const actualMessage = getFailureMessage(givenDurations);
+
+        // THEN sample adequacy is FAIR
+        const expectedSampleTag = formatTag(classifySampleAdequacy(givenDurations.length));
+        expect(actualMessage).toContain(`Sample adequacy: ${expectedSampleTag} (n=${givenDurations.length})`);
+    });
+
+    test("should show FAIR sample adequacy when n=30", () => {
+        // GIVEN 30 identical durations
+        const givenDurations = Array(30).fill(10);
+
+        // WHEN the quantile matcher fails
+        const actualMessage = getFailureMessage(givenDurations);
+
+        // THEN sample adequacy is FAIR
+        const expectedSampleTag = formatTag(classifySampleAdequacy(givenDurations.length));
+        expect(actualMessage).toContain(`Sample adequacy: ${expectedSampleTag} (n=${givenDurations.length})`);
+    });
+
+    test("should show no RME/CV tags when RME is null but CI exists (mean=0)", () => {
+        // GIVEN durations with mocked mean=0 (produces null RME and CV but non-null CI)
+        const givenDurations = [8, 9, 10, 11, 12];
+        mockFunctionProcessTimes(givenDurations);
+
+        const givenStats = metrics.calcStats(givenDurations);
+        jest.spyOn(metrics, 'calcStats').mockReturnValue({
+            ...givenStats,
+            mean: 0,
+            relativeMarginOfError: null,
+            coefficientOfVariation: null,
+            confidenceInterval: [givenStats.confidenceInterval![0], givenStats.confidenceInterval![1]],
+        });
+
+        // WHEN the quantile matcher fails
+        let actualMessage = '';
+        try {
+            expect(() => undefined).toCompleteWithinQuantile(0.001, {iterations: givenDurations.length, quantile: 1});
+        } catch (e) {
+            actualMessage = (e as Error).message;
+        }
+
+        // THEN CI exists but has no tag, and interpretation explains mean≈0 limitation
+        expect(actualMessage).toContain('Confidence Interval (CI): 95% [');
+        expect(actualMessage).not.toMatch(/Confidence Interval \(CI\): 95% \[.*]ms \[/);
+        expect(actualMessage).toContain('Relative Margin of Error (RME): N/A');
+        expect(actualMessage).toContain('Coefficient of Variation (CV): N/A');
+        expect(actualMessage).toContain('Interpretation: relative error cannot be computed');
+    });
 });
 
 describe("Test jest expect.toResolveWithinQuantile assertion", () => {
@@ -554,7 +913,7 @@ describe("Test jest expect.toResolveWithinQuantile assertion", () => {
         // WHEN asserting that (Q%) of the times when running for (I) iterations, the promise will resolve in (T) - 1 milliseconds
         // THEN expect to fail
         const Q = 1;
-        const expectedStatsBlock = buildStatsBlock(T_Array);
+        const expectedStatsBlock = buildStatsBlock(T_Array, T - 1);
         await expect(async () => {
             await expect(() => Promise.resolve()).toResolveWithinQuantile(T - 1, {iterations: I, quantile: Q});
         }).rejects.toThrowError(`expected that ${Q}% of the time when running ${I} iterations,\nthe function duration to be less or equal to ${printExpected(T - 1)} (ms),\ninstead it was ${printReceived(T)} (ms)\n\n${expectedStatsBlock}`);
@@ -570,7 +929,7 @@ describe("Test jest expect.toResolveWithinQuantile assertion", () => {
         // WHEN asserting that (Q%) of the times when running for (I) iterations, the promise will not resolve in (T) milliseconds
         // THEN expect to fail
         const Q = 1;
-        const expectedStatsBlock = buildStatsBlock(T_Array);
+        const expectedStatsBlock = buildStatsBlock(T_Array, T);
         await expect(async () => {
             await expect(() => Promise.resolve()).not.toResolveWithinQuantile(T, {iterations: I, quantile: Q});
         }).rejects.toThrowError(`expected that ${Q}% of the time when running ${I} iterations,\nthe function duration to be greater than ${printExpected(T)} (ms),\ninstead it was ${printReceived(T)} (ms)\n\n${expectedStatsBlock}`);
