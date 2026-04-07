@@ -525,4 +525,40 @@ describe("generateInterpretation", () => {
         expect(actualResult).toContain(`entirely above your ${givenThreshold}ms threshold`);
         expect(actualResult).toContain('almost certainly too slow');
     });
+
+    test("should append excluded-runs note when errorInfo has errors", () => {
+        // GIVEN stats with valid CI and errorInfo indicating excluded runs
+        const givenStats = buildStats({});
+        const givenErrorInfo = { errorCount: 3, totalIterations: 50, allowedRate: 0.1 };
+
+        // WHEN generating interpretation with errorInfo
+        const actualResult = generateInterpretation(givenStats, undefined, givenErrorInfo);
+
+        // THEN the note about excluded runs is appended
+        expect(actualResult).toContain(`${givenErrorInfo.errorCount} of ${givenErrorInfo.totalIterations} iterations were excluded due to errors`);
+        expect(actualResult).toContain('stats reflect successful runs only');
+    });
+
+    test("should not append excluded-runs note when errorInfo has zero errors", () => {
+        // GIVEN stats with valid CI and errorInfo with zero errors
+        const givenStats = buildStats({});
+        const givenErrorInfo = { errorCount: 0, totalIterations: 50, allowedRate: 0.1 };
+
+        // WHEN generating interpretation with errorInfo
+        const actualResult = generateInterpretation(givenStats, undefined, givenErrorInfo);
+
+        // THEN no excluded-runs note is appended
+        expect(actualResult).not.toContain('iterations were excluded');
+    });
+
+    test("should not append excluded-runs note when errorInfo is undefined", () => {
+        // GIVEN stats with valid CI and no errorInfo
+        const givenStats = buildStats({});
+
+        // WHEN generating interpretation without errorInfo
+        const actualResult = generateInterpretation(givenStats);
+
+        // THEN no excluded-runs note is appended
+        expect(actualResult).not.toContain('iterations were excluded');
+    });
 });
