@@ -118,7 +118,7 @@ expect(() => {
 
 ## Matchers
 
-### `.toCompleteWithin(ms)`
+### `.toCompleteWithin(ms, options?)`
 
 Assert that synchronous code runs within the given duration:
 
@@ -131,6 +131,13 @@ expect(() => {
 expect(() => {
     heavyComputation();
 }).not.toCompleteWithin(10);
+
+// With setup/teardown — setup return value is passed to the callback, not timed
+expect((data: number[]) => {
+    sortArray(data);
+}).toCompleteWithin(10, {
+    setup: () => generateRandomArray(1000),
+});
 ```
 
 ### `.toCompleteWithinQuantile(ms, options)`
@@ -159,9 +166,9 @@ expect(() => {
 }).toCompleteWithinQuantile(10, { iterations: 100, quantile: 95, warmup: 5, outliers: 'remove' });
 ```
 
-### `.toResolveWithin(ms)`
+### `.toResolveWithin(ms, options?)`
 
-Assert that asynchronous code resolves within the given duration:
+Assert that asynchronous code resolves within the given duration. Supports optional `setup`/`teardown` callbacks (`setup` return value is passed to the callback and teardown; may return a Promise):
 
 ```ts
 await expect(async () => {
@@ -208,6 +215,47 @@ await expect(async () => {
 | `quantile` | `number` | Yes | Percentile threshold, 1-100 (e.g., `95` means P95) |
 | `warmup` | `number` | No | Warmup iterations to run before measurement (default: `0`) |
 | `outliers` | `'remove' \| 'keep'` | No | Whether to remove IQR-based outliers before computing the quantile (default: `'keep'`) |
+| `setup` | `() => T` | No | Called **once** before all iterations. Its return value is passed to `setupEach`, the callback, `teardownEach`, and `teardown`. Errors are fatal |
+| `teardown` | `(suiteState: T) => void` | No | Called **once** after all iterations. Receives the `setup` return value. Errors are fatal |
+| `setupEach` | `(suiteState: T) => U` | No | Called before **each** iteration (including warmup), not timed. Receives the `setup` return value; its own return value is passed to the callback and `teardownEach`. Errors are fatal |
+| `teardownEach` | `(suiteState: T, iterState: U) => void` | No | Called after **each** iteration (including warmup), not timed. Receives both `setup` and `setupEach` return values. Errors are fatal |
+
+> **Note:** For async matchers (`toResolveWithinQuantile`), `setup` and `setupEach` may return a `Promise` (the resolved value is forwarded), and `teardown`/`teardownEach` may return a `Promise`.
+
+#### Setup/teardown example
+
+```ts
+// setup runs once, setupEach runs per iteration — callback receives both
+expect((conn: DbConnection, data: Row[]) => {
+    processRows(conn, data);
+}).toCompleteWithinQuantile(10, {
+    iterations: 100,
+    quantile: 95,
+    setup: (): DbConnection => createDbConnection(),
+    setupEach: (conn: DbConnection): Row[] => conn.query('SELECT * FROM test_data'),
+    teardownEach: (conn: DbConnection, data: Row[]) => { /* per-iteration cleanup */ },
+    teardown: (conn: DbConnection) => conn.close(),
+});
+```
+
+#### Async setup/teardown example
+
+```ts
+// Async hooks — setup opens a pool once, setupEach fetches fresh data per iteration
+await expect(async (pool: Pool, rows: Row[]) => {
+    await processRows(pool, rows);
+}).toResolveWithinQuantile(50, {
+    iterations: 100,
+    quantile: 95,
+    warmup: 5,
+    setup: async (): Promise<Pool> => await createConnectionPool(),
+    setupEach: async (pool: Pool): Promise<Row[]> => await pool.query('SELECT * FROM test_data'),
+    teardownEach: async (pool: Pool, rows: Row[]) => { await pool.query('DELETE FROM temp'); },
+    teardown: async (pool: Pool) => { await pool.close(); },
+});
+```
+
+Setup, teardown, setupEach, and teardownEach time is excluded from measurements. If any throws, the test fails immediately — these are test infrastructure errors, not tolerated failures.
 
 ## Failure diagnostics
 

@@ -9,7 +9,7 @@ function mockFunctionProcessTime(milliseconds: number) {
     mockFunctionProcessTimes([milliseconds]);
 }
 
-function buildStatsBlock(durations: number[], expectedDuration?: number): string {
+function buildStatsBlock(durations: number[], expectedDuration?: number, setupTeardownActive?: boolean): string {
     const stats = metrics.calcStats(durations);
     const fmt = (v: number | null) => v !== null ? v.toFixed(2) : 'N/A';
 
@@ -40,7 +40,7 @@ function buildStatsBlock(durations: number[], expectedDuration?: number): string
         : `Median Absolute Deviation (MAD): ${stats.mad.toFixed(2)}ms${madTag !== null ? ` [${formatTag(madTag)}]` : ''}`;
 
     const lines = [
-        `Statistics (n=${stats.n}): mean=${fmt(stats.mean)}ms, median=${fmt(stats.median)}ms, stddev=${fmt(stats.stddev)}ms`,
+        `Statistics (n=${stats.n}${setupTeardownActive ? ', setup/teardown active' : ''}): mean=${fmt(stats.mean)}ms, median=${fmt(stats.median)}ms, stddev=${fmt(stats.stddev)}ms`,
         ciText,
         rmeText,
         cvText,
@@ -125,6 +125,187 @@ describe("Test jest expect.toCompleteWithin assertion", () => {
     });
 });
 
+describe("Setup/teardown options for toCompleteWithin", () => {
+    beforeEach(() => {
+        jest.restoreAllMocks();
+    });
+
+    test("should call setup before timing and teardown after when both hooks are provided", () => {
+        // GIVEN a callback with setup and teardown hooks that record their call order
+        const actualCallOrder: string[] = [];
+        jest.spyOn(process, "hrtime").mockImplementation(() => {
+            actualCallOrder.push('hrtime');
+            return [1, 0];
+        });
+
+        // WHEN asserting toCompleteWithin with both hooks
+        expect(() => {
+            actualCallOrder.push('callback');
+        }).toCompleteWithin(1000, {
+            setup: () => { actualCallOrder.push('setup'); },
+            teardown: () => { actualCallOrder.push('teardown'); },
+        });
+
+        // THEN the call order is setup → hrtime(t0) → callback → hrtime(t1) → teardown
+        const expectedCallOrder = ['setup', 'hrtime', 'callback', 'hrtime', 'teardown'];
+        expect(actualCallOrder).toEqual(expectedCallOrder);
+    });
+
+    test("should propagate setup error immediately when setup throws", () => {
+        // GIVEN a function that completes within the budget
+        mockFunctionProcessTime(10);
+        const givenSetupError = "foo-setup-error";
+
+        // WHEN setup throws an error
+        // THEN the error propagates immediately
+        expect(() => {
+            expect(() => undefined).toCompleteWithin(10, {
+                setup: () => { throw new Error(givenSetupError); },
+            });
+        }).toThrowError(givenSetupError);
+    });
+
+    test("should propagate teardown error immediately when teardown throws", () => {
+        // GIVEN a function that completes within the budget
+        mockFunctionProcessTime(10);
+        const givenTeardownError = "foo-teardown-error";
+
+        // WHEN teardown throws an error
+        // THEN the error propagates immediately
+        expect(() => {
+            expect(() => undefined).toCompleteWithin(10, {
+                teardown: () => { throw new Error(givenTeardownError); },
+            });
+        }).toThrowError(givenTeardownError);
+    });
+
+    test("should pass the assertion when no options are provided (backward compatible)", () => {
+        // GIVEN a function that completes within the budget
+        mockFunctionProcessTime(10);
+
+        // WHEN asserting toCompleteWithin without options
+        // THEN expect success (backward compatible)
+        expect(() => undefined).toCompleteWithin(10);
+    });
+
+    test("should throw validation error when setup is not a function", () => {
+        // GIVEN an invalid setup value that is not a function
+        const givenInvalidSetup = 42;
+
+        // WHEN asserting toCompleteWithin with the invalid setup
+        // THEN a validation error is thrown
+        expect(() => {
+            // @ts-expect-error - intentionally passing invalid setup for testing
+            expect(() => undefined).toCompleteWithin(10, { setup: givenInvalidSetup });
+        }).toThrowError("jest-performance-matchers: setup must be a function if provided, received number");
+    });
+
+    test("should throw validation error when teardown is not a function", () => {
+        // GIVEN an invalid teardown value that is not a function
+        const givenInvalidTeardown = "foo-not-a-function";
+
+        // WHEN asserting toCompleteWithin with the invalid teardown
+        // THEN a validation error is thrown
+        expect(() => {
+            // @ts-expect-error - intentionally passing invalid teardown for testing
+            expect(() => undefined).toCompleteWithin(10, { teardown: givenInvalidTeardown });
+        }).toThrowError("jest-performance-matchers: teardown must be a function if provided, received string");
+    });
+
+    test("should pass setup return value to callback and teardown when setup returns a value", () => {
+        // GIVEN a function with setup that returns data
+        mockFunctionProcessTime(10);
+        const givenSetupData = ["foo-item-1", "foo-item-2"];
+        const actualCallbackArgs: unknown[] = [];
+        const actualTeardownArgs: unknown[] = [];
+
+        // WHEN asserting toCompleteWithin with setup that returns a value
+        expect((data: unknown) => {
+            actualCallbackArgs.push(data);
+        }).toCompleteWithin(10, {
+            setup: () => givenSetupData,
+            teardown: (data) => { actualTeardownArgs.push(data); },
+        });
+
+        // THEN the callback receives the setup return value
+        const expectedArgs = [givenSetupData];
+        expect(actualCallbackArgs).toEqual(expectedArgs);
+        // AND the teardown receives the same value
+        expect(actualTeardownArgs).toEqual(expectedArgs);
+    });
+
+    test("should pass undefined to callback when no setup is provided", () => {
+        // GIVEN a function with no setup hook
+        mockFunctionProcessTime(10);
+        const actualCallbackArgs: unknown[] = [];
+
+        // WHEN asserting toCompleteWithin without setup
+        expect((data: unknown) => {
+            actualCallbackArgs.push(data);
+        }).toCompleteWithin(10);
+
+        // THEN the callback receives undefined as the state argument
+        expect(actualCallbackArgs).toEqual([undefined]);
+    });
+
+    test("should call teardown when no setup is provided (teardown-only)", () => {
+        // GIVEN a function with only a teardown hook (no setup)
+        mockFunctionProcessTime(10);
+        const givenTeardownFn = jest.fn();
+
+        // WHEN asserting toCompleteWithin with only teardown
+        expect(() => undefined).toCompleteWithin(10, {
+            teardown: givenTeardownFn,
+        });
+
+        // THEN teardown is called once
+        expect(givenTeardownFn).toHaveBeenCalledTimes(1);
+        // AND teardown receives undefined since no setup was provided
+        expect(givenTeardownFn).toHaveBeenCalledWith(undefined);
+    });
+
+    test("should still call teardown when callback throws", () => {
+        // GIVEN a callback that throws and a teardown hook
+        mockFunctionProcessTime(10);
+        const givenSetupState = "foo-state";
+        const givenTeardownFn = jest.fn();
+        const givenCallbackError = "foo-callback-error";
+
+        // WHEN the callback throws an error
+        expect(() => {
+            expect(() => { throw new Error(givenCallbackError); }).toCompleteWithin(10, {
+                setup: () => givenSetupState,
+                teardown: givenTeardownFn,
+            });
+        }).toThrowError(givenCallbackError);
+
+        // THEN teardown is still called via try/finally with the setup state
+        expect(givenTeardownFn).toHaveBeenCalledTimes(1);
+        // AND teardown receives the setup return value
+        expect(givenTeardownFn).toHaveBeenCalledWith(givenSetupState);
+    });
+
+    test("should call teardown and throw negation error when .not is used with setup/teardown hooks", () => {
+        // GIVEN a function that completes within the budget and has setup/teardown hooks
+        mockFunctionProcessTime(10);
+        const givenSetupState = "foo-state";
+        const givenTeardownFn = jest.fn();
+
+        // WHEN using .not negation (expecting the assertion to fail)
+        expect(() => {
+            expect(() => undefined).not.toCompleteWithin(10, {
+                setup: () => givenSetupState,
+                teardown: givenTeardownFn,
+            });
+        }).toThrowError(/to be greater than/);
+
+        // THEN teardown is still called despite the negation error
+        expect(givenTeardownFn).toHaveBeenCalledTimes(1);
+        // AND teardown receives the setup return value
+        expect(givenTeardownFn).toHaveBeenCalledWith(givenSetupState);
+    });
+});
+
 describe("Test jest expect.toResolveWithin assertion", () => {
     beforeEach(() => {
         jest.restoreAllMocks();
@@ -197,6 +378,227 @@ describe("Test jest expect.toResolveWithin assertion", () => {
         await expect(mockFn).toResolveWithin(T);
         // THEN expect the promise to have been called once
         expect(mockFn).toBeCalledTimes(1);
+    });
+});
+
+describe("Setup/teardown options for toResolveWithin", () => {
+    beforeEach(() => {
+        jest.restoreAllMocks();
+    });
+
+    test("should call setup before timing and teardown after when both hooks are provided", async () => {
+        // GIVEN a promise with setup and teardown hooks that record their call order
+        const actualCallOrder: string[] = [];
+        jest.spyOn(process, "hrtime").mockImplementation(() => {
+            actualCallOrder.push('hrtime');
+            return [1, 0];
+        });
+
+        // WHEN asserting toResolveWithin with both hooks
+        await expect(async () => {
+            actualCallOrder.push('callback');
+        }).toResolveWithin(1000, {
+            setup: () => { actualCallOrder.push('setup'); },
+            teardown: () => { actualCallOrder.push('teardown'); },
+        });
+
+        // THEN the call order is setup → hrtime(t0) → callback → hrtime(t1) → teardown
+        const expectedCallOrder = ['setup', 'hrtime', 'callback', 'hrtime', 'teardown'];
+        expect(actualCallOrder).toEqual(expectedCallOrder);
+    });
+
+    test("should await async setup and teardown when both return Promises", async () => {
+        // GIVEN a promise with async setup and teardown hooks
+        mockFunctionProcessTime(10);
+        const actualOrder: string[] = [];
+
+        // WHEN asserting toResolveWithin with async hooks
+        await expect(async () => {
+            actualOrder.push('callback');
+        }).toResolveWithin(10, {
+            setup: async () => { actualOrder.push('setup'); },
+            teardown: async () => { actualOrder.push('teardown'); },
+        });
+
+        // THEN setup and teardown are awaited in order
+        const expectedOrder = ['setup', 'callback', 'teardown'];
+        expect(actualOrder).toEqual(expectedOrder);
+    });
+
+    test("should propagate async setup rejection immediately when setup rejects", async () => {
+        // GIVEN a promise that resolves within the budget
+        mockFunctionProcessTime(10);
+        const givenSetupError = "foo-async-setup-error";
+
+        // WHEN async setup rejects
+        // THEN the rejection propagates immediately
+        await expect(
+            expect(async () => await Promise.resolve()).toResolveWithin(10, {
+                setup: async () => { throw new Error(givenSetupError); },
+            })
+        ).rejects.toThrowError(givenSetupError);
+    });
+
+    test("should propagate async teardown rejection immediately when teardown rejects", async () => {
+        // GIVEN a promise that resolves within the budget
+        mockFunctionProcessTime(10);
+        const givenTeardownError = "foo-async-teardown-error";
+
+        // WHEN async teardown rejects
+        // THEN the rejection propagates immediately
+        await expect(
+            expect(async () => await Promise.resolve()).toResolveWithin(10, {
+                teardown: async () => { throw new Error(givenTeardownError); },
+            })
+        ).rejects.toThrowError(givenTeardownError);
+    });
+
+    test("should pass the assertion when no options are provided (backward compatible)", async () => {
+        // GIVEN a promise that resolves within the budget
+        mockFunctionProcessTime(10);
+
+        // WHEN asserting toResolveWithin without options
+        // THEN expect success (backward compatible)
+        await expect(async () => await Promise.resolve()).toResolveWithin(10);
+    });
+
+    test("should throw validation error when setup is not a function", async () => {
+        // GIVEN an invalid setup value that is not a function
+        const givenInvalidSetup = 42;
+
+        // WHEN asserting toResolveWithin with the invalid setup
+        // THEN a validation error is thrown
+        await expect(async () => {
+            // @ts-expect-error - intentionally passing invalid setup for testing
+            await expect(async () => Promise.resolve()).toResolveWithin(10, { setup: givenInvalidSetup });
+        }).rejects.toThrowError("jest-performance-matchers: setup must be a function if provided, received number");
+    });
+
+    test("should throw validation error when teardown is not a function", async () => {
+        // GIVEN an invalid teardown value that is not a function
+        const givenInvalidTeardown = "foo-not-a-function";
+
+        // WHEN asserting toResolveWithin with the invalid teardown
+        // THEN a validation error is thrown
+        await expect(async () => {
+            // @ts-expect-error - intentionally passing invalid teardown for testing
+            await expect(async () => Promise.resolve()).toResolveWithin(10, { teardown: givenInvalidTeardown });
+        }).rejects.toThrowError("jest-performance-matchers: teardown must be a function if provided, received string");
+    });
+
+    test("should pass setup return value to callback and teardown when setup returns a value", async () => {
+        // GIVEN a promise with setup that returns data
+        mockFunctionProcessTime(10);
+        const givenSetupData = { key: "foo-value" };
+        const actualCallbackArgs: unknown[] = [];
+        const actualTeardownArgs: unknown[] = [];
+
+        // WHEN asserting toResolveWithin with setup that returns a value
+        await expect(async (data: unknown) => {
+            actualCallbackArgs.push(data);
+        }).toResolveWithin(10, {
+            setup: () => givenSetupData,
+            teardown: (data) => { actualTeardownArgs.push(data); },
+        });
+
+        // THEN the callback receives the setup return value
+        const expectedArgs = [givenSetupData];
+        expect(actualCallbackArgs).toEqual(expectedArgs);
+        // AND the teardown receives the same value
+        expect(actualTeardownArgs).toEqual(expectedArgs);
+    });
+
+    test("should pass resolved value to callback and teardown when async setup returns a Promise", async () => {
+        // GIVEN a promise with async setup that resolves to a value
+        mockFunctionProcessTime(10);
+        const givenResolvedValue = "foo-async-result";
+        const actualCallbackArgs: unknown[] = [];
+        const actualTeardownArgs: unknown[] = [];
+
+        // WHEN asserting toResolveWithin with async setup
+        await expect(async (data: unknown) => {
+            actualCallbackArgs.push(data);
+        }).toResolveWithin(10, {
+            setup: async () => givenResolvedValue,
+            teardown: (data) => { actualTeardownArgs.push(data); },
+        });
+
+        // THEN the callback receives the resolved value
+        const expectedArgs = [givenResolvedValue];
+        expect(actualCallbackArgs).toEqual(expectedArgs);
+        // AND the teardown receives the same resolved value
+        expect(actualTeardownArgs).toEqual(expectedArgs);
+    });
+
+    test("should pass undefined to callback when no setup is provided", async () => {
+        // GIVEN a promise with no setup hook
+        mockFunctionProcessTime(10);
+        const actualCallbackArgs: unknown[] = [];
+
+        // WHEN asserting toResolveWithin without setup
+        await expect(async (data: unknown) => {
+            actualCallbackArgs.push(data);
+        }).toResolveWithin(10);
+
+        // THEN the callback receives undefined as the state argument
+        expect(actualCallbackArgs).toEqual([undefined]);
+    });
+
+    test("should call teardown when no setup is provided (teardown-only)", async () => {
+        // GIVEN a promise with only a teardown hook (no setup)
+        mockFunctionProcessTime(10);
+        const givenTeardownFn = jest.fn();
+
+        // WHEN asserting toResolveWithin with only teardown
+        await expect(async () => await Promise.resolve()).toResolveWithin(10, {
+            teardown: givenTeardownFn,
+        });
+
+        // THEN teardown is called once
+        expect(givenTeardownFn).toHaveBeenCalledTimes(1);
+        // AND teardown receives undefined since no setup was provided
+        expect(givenTeardownFn).toHaveBeenCalledWith(undefined);
+    });
+
+    test("should still call teardown when promise rejects", async () => {
+        // GIVEN a promise that rejects and a teardown hook
+        mockFunctionProcessTime(10);
+        const givenSetupState = "foo-state";
+        const givenTeardownFn = jest.fn();
+        const givenPromiseError = "foo-promise-error";
+
+        // WHEN the promise rejects
+        await expect(
+            expect(async () => { throw new Error(givenPromiseError); }).toResolveWithin(10, {
+                setup: () => givenSetupState,
+                teardown: givenTeardownFn,
+            })
+        ).rejects.toThrowError(givenPromiseError);
+
+        // THEN teardown is still called via try/finally with the setup state
+        expect(givenTeardownFn).toHaveBeenCalledTimes(1);
+        // AND teardown receives the setup return value
+        expect(givenTeardownFn).toHaveBeenCalledWith(givenSetupState);
+    });
+
+    test("should call teardown and reject with negation error when .not is used with setup/teardown hooks", async () => {
+        // GIVEN a promise that resolves within the budget and has setup/teardown hooks
+        mockFunctionProcessTime(10);
+        const givenSetupState = "foo-state";
+        const givenTeardownFn = jest.fn();
+
+        // WHEN using .not negation (expecting the assertion to fail)
+        await expect(async () => {
+            await expect(async () => await Promise.resolve()).not.toResolveWithin(10, {
+                setup: () => givenSetupState,
+                teardown: givenTeardownFn,
+            });
+        }).rejects.toThrowError(/to be greater than/);
+
+        // THEN teardown is still called despite the negation error
+        expect(givenTeardownFn).toHaveBeenCalledTimes(1);
+        // AND teardown receives the setup return value
+        expect(givenTeardownFn).toHaveBeenCalledWith(givenSetupState);
     });
 });
 
@@ -557,6 +959,783 @@ describe("Test jest expect.toCompleteWithinQuantile assertion", () => {
         expect(actualMessage).toContain('Sample adequacy:');
         expect(actualMessage).toContain('Interpretation:');
     });
+});
+
+describe("Setup/teardown options (sync)", () => {
+    beforeEach(() => {
+        jest.restoreAllMocks();
+    });
+
+    test("should call setup once and teardown once when both are provided", () => {
+        // GIVEN a function with suite-level setup and teardown hooks
+        const givenDuration = 10;
+        const givenIterations = 5;
+        const givenQuantile = 50;
+        mockFunctionProcessTimes(Array(givenIterations).fill(givenDuration));
+        const givenSetupFn = jest.fn();
+        const givenTeardownFn = jest.fn();
+
+        // WHEN asserting toCompleteWithinQuantile with setup and teardown
+        expect(() => undefined).toCompleteWithinQuantile(givenDuration, {
+            iterations: givenIterations, quantile: givenQuantile, setup: givenSetupFn, teardown: givenTeardownFn,
+        });
+
+        // THEN setup is called exactly once (suite-level)
+        expect(givenSetupFn).toHaveBeenCalledTimes(1);
+        // AND teardown is called exactly once (suite-level)
+        expect(givenTeardownFn).toHaveBeenCalledTimes(1);
+    });
+
+    test("should call setupEach before each measured iteration when setupEach is provided", () => {
+        // GIVEN a function with a per-iteration setupEach hook and 5 iterations
+        const givenDuration = 10;
+        const givenIterations = 5;
+        const givenQuantile = 50;
+        mockFunctionProcessTimes(Array(givenIterations).fill(givenDuration));
+        const givenSetupEachFn = jest.fn();
+
+        // WHEN asserting toCompleteWithinQuantile with setupEach
+        expect(() => undefined).toCompleteWithinQuantile(givenDuration, {
+            iterations: givenIterations, quantile: givenQuantile, setupEach: givenSetupEachFn,
+        });
+
+        // THEN setupEach is called once per iteration
+        expect(givenSetupEachFn).toHaveBeenCalledTimes(givenIterations);
+    });
+
+    test("should call teardownEach after each measured iteration when teardownEach is provided", () => {
+        // GIVEN a function with a per-iteration teardownEach hook and 5 iterations
+        const givenDuration = 10;
+        const givenIterations = 5;
+        const givenQuantile = 50;
+        mockFunctionProcessTimes(Array(givenIterations).fill(givenDuration));
+        const givenTeardownEachFn = jest.fn();
+
+        // WHEN asserting toCompleteWithinQuantile with teardownEach
+        expect(() => undefined).toCompleteWithinQuantile(givenDuration, {
+            iterations: givenIterations, quantile: givenQuantile, teardownEach: givenTeardownEachFn,
+        });
+
+        // THEN teardownEach is called once per iteration
+        expect(givenTeardownEachFn).toHaveBeenCalledTimes(givenIterations);
+    });
+
+    test("should call setupEach and teardownEach during warmup iterations when warmup is configured", () => {
+        // GIVEN a function with per-iteration hooks, 3 measured iterations and 2 warmup iterations
+        const givenDuration = 10;
+        const givenIterations = 3;
+        const givenQuantile = 50;
+        const givenWarmup = 2;
+        mockFunctionProcessTimes(Array(givenIterations).fill(givenDuration));
+        const givenSetupEachFn = jest.fn();
+        const givenTeardownEachFn = jest.fn();
+
+        // WHEN asserting toCompleteWithinQuantile with warmup
+        expect(() => undefined).toCompleteWithinQuantile(givenDuration, {
+            iterations: givenIterations, quantile: givenQuantile, warmup: givenWarmup,
+            setupEach: givenSetupEachFn, teardownEach: givenTeardownEachFn,
+        });
+
+        // THEN setupEach is called for warmup + measured = total times
+        const expectedTotalCalls = givenWarmup + givenIterations;
+        expect(givenSetupEachFn).toHaveBeenCalledTimes(expectedTotalCalls);
+        // AND teardownEach is called the same number of times
+        expect(givenTeardownEachFn).toHaveBeenCalledTimes(expectedTotalCalls);
+    });
+
+    test("should work with only setupEach (no teardownEach) when only setupEach is provided", () => {
+        // GIVEN a function with only setupEach (no teardownEach)
+        const givenDuration = 10;
+        const givenIterations = 3;
+        const givenQuantile = 50;
+        mockFunctionProcessTimes(Array(givenIterations).fill(givenDuration));
+        const givenSetupEachFn = jest.fn();
+
+        // WHEN asserting toCompleteWithinQuantile with only setupEach
+        expect(() => undefined).toCompleteWithinQuantile(givenDuration, {
+            iterations: givenIterations, quantile: givenQuantile, setupEach: givenSetupEachFn,
+        });
+
+        // THEN setupEach is called once per iteration
+        expect(givenSetupEachFn).toHaveBeenCalledTimes(givenIterations);
+    });
+
+    test("should work with only teardownEach (no setupEach) when only teardownEach is provided", () => {
+        // GIVEN a function with only teardownEach (no setupEach)
+        const givenDuration = 10;
+        const givenIterations = 3;
+        const givenQuantile = 50;
+        mockFunctionProcessTimes(Array(givenIterations).fill(givenDuration));
+        const givenTeardownEachFn = jest.fn();
+
+        // WHEN asserting toCompleteWithinQuantile with only teardownEach
+        expect(() => undefined).toCompleteWithinQuantile(givenDuration, {
+            iterations: givenIterations, quantile: givenQuantile, teardownEach: givenTeardownEachFn,
+        });
+
+        // THEN teardownEach is called once per iteration
+        expect(givenTeardownEachFn).toHaveBeenCalledTimes(givenIterations);
+    });
+
+    test("should propagate setup error immediately when setup throws", () => {
+        // GIVEN a function with a setup hook that throws
+        const givenDuration = 10;
+        const givenIterations = 3;
+        const givenQuantile = 50;
+        const givenSetupError = "foo-setup-error";
+        mockFunctionProcessTimes(Array(givenIterations).fill(givenDuration));
+
+        // WHEN setup throws an error
+        // THEN the error propagates immediately
+        expect(() => {
+            expect(() => undefined).toCompleteWithinQuantile(givenDuration, {
+                iterations: givenIterations, quantile: givenQuantile,
+                setup: () => { throw new Error(givenSetupError); },
+            });
+        }).toThrowError(givenSetupError);
+    });
+
+    test("should propagate teardown error immediately when teardown throws", () => {
+        // GIVEN a function with a teardown hook that throws
+        const givenDuration = 10;
+        const givenIterations = 3;
+        const givenQuantile = 50;
+        const givenTeardownError = "foo-teardown-error";
+        mockFunctionProcessTimes(Array(givenIterations).fill(givenDuration));
+
+        // WHEN teardown throws an error
+        // THEN the error propagates immediately
+        expect(() => {
+            expect(() => undefined).toCompleteWithinQuantile(givenDuration, {
+                iterations: givenIterations, quantile: givenQuantile,
+                teardown: () => { throw new Error(givenTeardownError); },
+            });
+        }).toThrowError(givenTeardownError);
+    });
+
+    test("should propagate setupEach error immediately when setupEach throws", () => {
+        // GIVEN a function with a setupEach hook that throws
+        const givenDuration = 10;
+        const givenIterations = 3;
+        const givenQuantile = 50;
+        const givenSetupEachError = "foo-setupEach-error";
+        mockFunctionProcessTimes(Array(givenIterations).fill(givenDuration));
+
+        // WHEN setupEach throws an error
+        // THEN the error propagates immediately
+        expect(() => {
+            expect(() => undefined).toCompleteWithinQuantile(givenDuration, {
+                iterations: givenIterations, quantile: givenQuantile,
+                setupEach: () => { throw new Error(givenSetupEachError); },
+            });
+        }).toThrowError(givenSetupEachError);
+    });
+
+    test("should still call teardown when setupEach throws", () => {
+        // GIVEN a function with setupEach that throws and a suite-level teardown
+        const givenDuration = 10;
+        const givenIterations = 3;
+        const givenQuantile = 50;
+        const givenSetupEachError = "foo-setupEach-error";
+        mockFunctionProcessTimes(Array(givenIterations).fill(givenDuration));
+        const givenSuiteState = "foo-suite";
+        const givenTeardownFn = jest.fn();
+
+        // WHEN setupEach throws on the first iteration
+        expect(() => {
+            expect(() => undefined).toCompleteWithinQuantile(givenDuration, {
+                iterations: givenIterations, quantile: givenQuantile,
+                setup: () => givenSuiteState,
+                setupEach: () => { throw new Error(givenSetupEachError); },
+                teardown: givenTeardownFn,
+            });
+        }).toThrowError(givenSetupEachError);
+
+        // THEN teardown is still called via outer try/finally
+        expect(givenTeardownFn).toHaveBeenCalledTimes(1);
+        // AND teardown receives the suite state
+        expect(givenTeardownFn).toHaveBeenCalledWith(givenSuiteState);
+    });
+
+    test("should propagate teardownEach error immediately when teardownEach throws", () => {
+        // GIVEN a function with a teardownEach hook that throws
+        const givenDuration = 10;
+        const givenIterations = 3;
+        const givenQuantile = 50;
+        const givenTeardownEachError = "foo-teardownEach-error";
+        mockFunctionProcessTimes(Array(givenIterations).fill(givenDuration));
+
+        // WHEN teardownEach throws an error
+        // THEN the error propagates immediately
+        expect(() => {
+            expect(() => undefined).toCompleteWithinQuantile(givenDuration, {
+                iterations: givenIterations, quantile: givenQuantile,
+                teardownEach: () => { throw new Error(givenTeardownEachError); },
+            });
+        }).toThrowError(givenTeardownEachError);
+    });
+
+    test("should show 'setup/teardown active' hint in stats block when setup is provided", () => {
+        // GIVEN a function that exceeds the budget with a setup hook
+        const givenDuration = 10;
+        const givenIterations = 5;
+        const givenQuantile = 50;
+        mockFunctionProcessTimes(Array(givenIterations).fill(givenDuration));
+
+        // WHEN the assertion fails
+        let actualMessage = '';
+        try {
+            expect(() => undefined).toCompleteWithinQuantile(givenDuration - 1, {
+                iterations: givenIterations, quantile: givenQuantile,
+                setup: () => { /* noop */ },
+            });
+        } catch (e) {
+            actualMessage = (e as Error).message;
+        }
+
+        // THEN the stats block includes the 'setup/teardown active' hint
+        expect(actualMessage).toContain('setup/teardown active');
+    });
+
+    test("should show 'setup/teardown active' hint in stats block when setupEach is provided", () => {
+        // GIVEN a function that exceeds the budget with a setupEach hook
+        const givenDuration = 10;
+        const givenIterations = 5;
+        const givenQuantile = 50;
+        mockFunctionProcessTimes(Array(givenIterations).fill(givenDuration));
+
+        // WHEN the assertion fails
+        let actualMessage = '';
+        try {
+            expect(() => undefined).toCompleteWithinQuantile(givenDuration - 1, {
+                iterations: givenIterations, quantile: givenQuantile,
+                setupEach: () => { /* noop */ },
+            });
+        } catch (e) {
+            actualMessage = (e as Error).message;
+        }
+
+        // THEN the stats block includes the 'setup/teardown active' hint
+        expect(actualMessage).toContain('setup/teardown active');
+    });
+
+    test("should NOT show 'setup/teardown active' hint when no hooks are provided", () => {
+        // GIVEN a function that exceeds the budget without any hooks
+        const givenDuration = 10;
+        const givenIterations = 5;
+        const givenQuantile = 50;
+        mockFunctionProcessTimes(Array(givenIterations).fill(givenDuration));
+
+        // WHEN the assertion fails
+        let actualMessage = '';
+        try {
+            expect(() => undefined).toCompleteWithinQuantile(givenDuration - 1, {
+                iterations: givenIterations, quantile: givenQuantile,
+            });
+        } catch (e) {
+            actualMessage = (e as Error).message;
+        }
+
+        // THEN the stats block does NOT include the 'setup/teardown active' hint
+        expect(actualMessage).not.toContain('setup/teardown active');
+    });
+
+    test("should show 'setup/teardown active' hint in .not negation message when setup is provided", () => {
+        // GIVEN a function that completes within the budget with a setup hook
+        const givenDuration = 10;
+        const givenIterations = 5;
+        const givenQuantile = 50;
+        mockFunctionProcessTimes(Array(givenIterations).fill(givenDuration));
+
+        // WHEN using .not negation (expecting the assertion to fail)
+        // THEN the error message includes the 'setup/teardown active' hint
+        expect(() => {
+            expect(() => undefined).not.toCompleteWithinQuantile(givenDuration, {
+                iterations: givenIterations, quantile: givenQuantile,
+                setup: () => { /* noop */ },
+            });
+        }).toThrowError(/setup\/teardown active/);
+    });
+
+    test("should call setup once, then setupEach before hrtime, then teardownEach after hrtime, then teardown once when all hooks are provided", () => {
+        // GIVEN a callback with all four hooks that record their call order
+        const givenIterations = 1;
+        const givenQuantile = 50;
+        const actualCallOrder: string[] = [];
+        jest.spyOn(process, "hrtime").mockImplementation(() => {
+            actualCallOrder.push('hrtime');
+            return [1, 0];
+        });
+
+        // WHEN asserting toCompleteWithinQuantile with all hooks for 1 iteration
+        expect(() => {
+            actualCallOrder.push('callback');
+        }).toCompleteWithinQuantile(1000, {
+            iterations: givenIterations, quantile: givenQuantile,
+            setup: () => { actualCallOrder.push('setup'); },
+            teardown: () => { actualCallOrder.push('teardown'); },
+            setupEach: () => { actualCallOrder.push('setupEach'); },
+            teardownEach: () => { actualCallOrder.push('teardownEach'); },
+        });
+
+        // THEN the call order is setup(once) → setupEach → hrtime(t0) → callback → hrtime(t1) → teardownEach → teardown(once)
+        const expectedCallOrder = ['setup', 'setupEach', 'hrtime', 'callback', 'hrtime', 'teardownEach', 'teardown'];
+        expect(actualCallOrder).toEqual(expectedCallOrder);
+    });
+
+    test("should pass setup return value to setupEach, callback, teardownEach, and teardown when all hooks return values", () => {
+        // GIVEN a function with all four hooks that return and receive values
+        const givenDuration = 10;
+        const givenIterations = 2;
+        const givenQuantile = 50;
+        mockFunctionProcessTimes(Array(givenIterations).fill(givenDuration));
+        const givenSuiteData = "foo-suite-state";
+        let givenIterCounter = 0;
+        const actualCallbackArgs: unknown[][] = [];
+        const actualTeardownEachArgs: unknown[][] = [];
+        const actualSetupEachArgs: unknown[] = [];
+        let actualTeardownArg: unknown;
+
+        // WHEN asserting toCompleteWithinQuantile with all four hooks
+        expect((suiteState: unknown, iterState: unknown) => {
+            actualCallbackArgs.push([suiteState, iterState]);
+        }).toCompleteWithinQuantile(givenDuration, {
+            iterations: givenIterations, quantile: givenQuantile,
+            setup: () => givenSuiteData,
+            setupEach: (suiteState) => { actualSetupEachArgs.push(suiteState); return ++givenIterCounter; },
+            teardownEach: (suiteState, iterState) => { actualTeardownEachArgs.push([suiteState, iterState]); },
+            teardown: (suiteState) => { actualTeardownArg = suiteState; },
+        });
+
+        // THEN setupEach receives suite state
+        expect(actualSetupEachArgs).toEqual([givenSuiteData, givenSuiteData]);
+        // AND callback receives both suite state and iter state
+        expect(actualCallbackArgs).toEqual([[givenSuiteData, 1], [givenSuiteData, 2]]);
+        // AND teardownEach receives both suite state and iter state
+        expect(actualTeardownEachArgs).toEqual([[givenSuiteData, 1], [givenSuiteData, 2]]);
+        // AND teardown receives suite state only
+        expect(actualTeardownArg).toBe(givenSuiteData);
+    });
+
+    test("should pass setup return value during warmup iterations when warmup is configured", () => {
+        // GIVEN a function with suite-level setup and per-iteration setupEach, with warmup
+        const givenDuration = 10;
+        const givenIterations = 2;
+        const givenQuantile = 50;
+        const givenWarmup = 2;
+        const givenSuiteState = "foo-suite";
+        mockFunctionProcessTimes(Array(givenIterations).fill(givenDuration));
+        let givenIterCounter = 0;
+        const actualCallbackArgs: unknown[][] = [];
+
+        // WHEN asserting toCompleteWithinQuantile with warmup
+        expect((suiteState: unknown, iterState: unknown) => {
+            actualCallbackArgs.push([suiteState, iterState]);
+        }).toCompleteWithinQuantile(givenDuration, {
+            iterations: givenIterations, quantile: givenQuantile, warmup: givenWarmup,
+            setup: () => givenSuiteState,
+            setupEach: () => ++givenIterCounter,
+        });
+
+        // THEN warmup (2) + measured (2) = 4 calls, all receive suite state and fresh iter state
+        expect(actualCallbackArgs).toEqual([
+            [givenSuiteState, 1], [givenSuiteState, 2], [givenSuiteState, 3], [givenSuiteState, 4],
+        ]);
+    });
+
+    test("should pass undefined for both states when no hooks are provided", () => {
+        // GIVEN a function with no hooks
+        const givenDuration = 10;
+        const givenIterations = 3;
+        const givenQuantile = 50;
+        mockFunctionProcessTimes(Array(givenIterations).fill(givenDuration));
+        const actualCallbackArgs: unknown[][] = [];
+
+        // WHEN asserting toCompleteWithinQuantile without any hooks
+        expect((suiteState: unknown, iterState: unknown) => {
+            actualCallbackArgs.push([suiteState, iterState]);
+        }).toCompleteWithinQuantile(givenDuration, {
+            iterations: givenIterations, quantile: givenQuantile,
+        });
+
+        // THEN callback receives undefined for both suite and iteration state
+        expect(actualCallbackArgs).toEqual([
+            [undefined, undefined], [undefined, undefined], [undefined, undefined],
+        ]);
+    });
+
+    test("should throw validation error when setupEach is not a function", () => {
+        // GIVEN an invalid setupEach value that is not a function
+        const givenInvalidSetupEach = 42;
+
+        // WHEN asserting toCompleteWithinQuantile with the invalid setupEach
+        // THEN a validation error is thrown
+        expect(() => {
+            // @ts-expect-error - intentionally passing invalid setupEach for testing
+            expect(() => undefined).toCompleteWithinQuantile(10, { iterations: 3, quantile: 50, setupEach: givenInvalidSetupEach });
+        }).toThrowError("jest-performance-matchers: setupEach must be a function if provided, received number");
+    });
+
+    test("should throw validation error when teardownEach is not a function", () => {
+        // GIVEN an invalid teardownEach value that is not a function
+        const givenInvalidTeardownEach = "foo-not-a-function";
+
+        // WHEN asserting toCompleteWithinQuantile with the invalid teardownEach
+        // THEN a validation error is thrown
+        expect(() => {
+            // @ts-expect-error - intentionally passing invalid teardownEach for testing
+            expect(() => undefined).toCompleteWithinQuantile(10, { iterations: 3, quantile: 50, teardownEach: givenInvalidTeardownEach });
+        }).toThrowError("jest-performance-matchers: teardownEach must be a function if provided, received string");
+    });
+
+    test("should still call teardown and teardownEach when callback throws", () => {
+        // GIVEN a callback that throws on first iteration, with suite-level teardown and per-iteration teardownEach
+        const givenDuration = 10;
+        const givenIterations = 3;
+        const givenQuantile = 50;
+        const givenSuiteState = "foo-suite";
+        const givenCallbackError = "foo-callback-error";
+        mockFunctionProcessTimes(Array(givenIterations).fill(givenDuration));
+        const givenTeardownFn = jest.fn();
+        const givenTeardownEachFn = jest.fn();
+
+        // WHEN the callback throws an error on the first iteration
+        expect(() => {
+            expect(() => { throw new Error(givenCallbackError); }).toCompleteWithinQuantile(givenDuration, {
+                iterations: givenIterations, quantile: givenQuantile,
+                setup: () => givenSuiteState,
+                teardown: givenTeardownFn,
+                teardownEach: givenTeardownEachFn,
+            });
+        }).toThrowError(givenCallbackError);
+
+        // THEN teardownEach is called once (for the failing iteration)
+        expect(givenTeardownEachFn).toHaveBeenCalledTimes(1);
+        // AND teardown is still called once with the suite state
+        expect(givenTeardownFn).toHaveBeenCalledTimes(1);
+        expect(givenTeardownFn).toHaveBeenCalledWith(givenSuiteState);
+    });
+});
+
+describe("Setup/teardown options (async)", () => {
+    beforeEach(() => {
+        jest.restoreAllMocks();
+    });
+
+    test("should call async setup once and teardown once when both are provided", async () => {
+        // GIVEN a promise with suite-level async setup and teardown hooks
+        const givenDuration = 10;
+        const givenIterations = 3;
+        mockFunctionProcessTimes(Array(givenIterations).fill(givenDuration));
+        const givenSetupFn = jest.fn();
+        const givenTeardownFn = jest.fn();
+
+        // WHEN asserting toResolveWithinQuantile with setup and teardown
+        await expect(async () => await Promise.resolve()).toResolveWithinQuantile(givenDuration, {
+            iterations: givenIterations, quantile: 50,
+            setup: givenSetupFn, teardown: givenTeardownFn,
+        });
+
+        // THEN setup is called exactly once (suite-level)
+        expect(givenSetupFn).toHaveBeenCalledTimes(1);
+        // AND teardown is called exactly once (suite-level)
+        expect(givenTeardownFn).toHaveBeenCalledTimes(1);
+    });
+
+    test("should call async setupEach and teardownEach for each iteration when both are provided", async () => {
+        // GIVEN a promise with per-iteration async hooks and 3 iterations
+        const givenDuration = 10;
+        const givenIterations = 3;
+        mockFunctionProcessTimes(Array(givenIterations).fill(givenDuration));
+        const givenSetupEachFn = jest.fn();
+        const givenTeardownEachFn = jest.fn();
+
+        // WHEN asserting toResolveWithinQuantile with setupEach and teardownEach
+        await expect(async () => await Promise.resolve()).toResolveWithinQuantile(givenDuration, {
+            iterations: givenIterations, quantile: 50,
+            setupEach: givenSetupEachFn, teardownEach: givenTeardownEachFn,
+        });
+
+        // THEN setupEach is called once per iteration
+        expect(givenSetupEachFn).toHaveBeenCalledTimes(givenIterations);
+        // AND teardownEach is called once per iteration
+        expect(givenTeardownEachFn).toHaveBeenCalledTimes(givenIterations);
+    });
+
+    test("should call async setupEach and teardownEach during warmup when warmup is configured", async () => {
+        // GIVEN a promise with per-iteration hooks, 3 measured iterations and 2 warmup iterations
+        const givenDuration = 10;
+        const givenIterations = 3;
+        const givenWarmup = 2;
+        mockFunctionProcessTimes(Array(givenIterations).fill(givenDuration));
+        const givenSetupEachFn = jest.fn();
+        const givenTeardownEachFn = jest.fn();
+
+        // WHEN asserting toResolveWithinQuantile with warmup
+        await expect(async () => await Promise.resolve()).toResolveWithinQuantile(givenDuration, {
+            iterations: givenIterations, quantile: 50, warmup: givenWarmup,
+            setupEach: givenSetupEachFn, teardownEach: givenTeardownEachFn,
+        });
+
+        // THEN setupEach is called for warmup + measured = total times
+        expect(givenSetupEachFn).toHaveBeenCalledTimes(givenWarmup + givenIterations);
+        // AND teardownEach is called the same number of times
+        expect(givenTeardownEachFn).toHaveBeenCalledTimes(givenWarmup + givenIterations);
+    });
+
+    test("should await async setup that returns a Promise when setup is async", async () => {
+        // GIVEN a promise with an async setup hook
+        const givenDuration = 10;
+        const givenIterations = 3;
+        mockFunctionProcessTimes(Array(givenIterations).fill(givenDuration));
+        const actualOrder: string[] = [];
+
+        // WHEN asserting toResolveWithinQuantile with async setup
+        await expect(async () => await Promise.resolve()).toResolveWithinQuantile(givenDuration, {
+            iterations: givenIterations, quantile: 50,
+            setup: async () => { actualOrder.push('setup-done'); },
+        });
+
+        // THEN setup is awaited and called once
+        expect(actualOrder).toEqual(['setup-done']);
+    });
+
+    test("should propagate async setup rejection immediately when setup rejects", async () => {
+        // GIVEN a promise with an async setup hook that rejects
+        const givenDuration = 10;
+        const givenIterations = 3;
+        const givenSetupError = "foo-async-setup-error";
+        mockFunctionProcessTimes(Array(givenIterations).fill(givenDuration));
+
+        // WHEN async setup rejects
+        // THEN the rejection propagates immediately
+        await expect(
+            expect(async () => await Promise.resolve()).toResolveWithinQuantile(givenDuration, {
+                iterations: givenIterations, quantile: 50,
+                setup: async () => { throw new Error(givenSetupError); },
+            })
+        ).rejects.toThrowError(givenSetupError);
+    });
+
+    test("should propagate async teardown rejection immediately when teardown rejects", async () => {
+        // GIVEN a promise with an async teardown hook that rejects
+        const givenDuration = 10;
+        const givenIterations = 3;
+        const givenTeardownError = "foo-async-teardown-error";
+        mockFunctionProcessTimes(Array(givenIterations).fill(givenDuration));
+
+        // WHEN async teardown rejects
+        // THEN the rejection propagates immediately
+        await expect(
+            expect(async () => await Promise.resolve()).toResolveWithinQuantile(givenDuration, {
+                iterations: givenIterations, quantile: 50,
+                teardown: async () => { throw new Error(givenTeardownError); },
+            })
+        ).rejects.toThrowError(givenTeardownError);
+    });
+
+    test("should propagate async setupEach rejection immediately when setupEach rejects", async () => {
+        // GIVEN a promise with an async setupEach hook that rejects
+        const givenDuration = 10;
+        const givenIterations = 3;
+        const givenSetupEachError = "foo-async-setupEach-error";
+        mockFunctionProcessTimes(Array(givenIterations).fill(givenDuration));
+
+        // WHEN async setupEach rejects
+        // THEN the rejection propagates immediately
+        await expect(
+            expect(async () => await Promise.resolve()).toResolveWithinQuantile(givenDuration, {
+                iterations: givenIterations, quantile: 50,
+                setupEach: async () => { throw new Error(givenSetupEachError); },
+            })
+        ).rejects.toThrowError(givenSetupEachError);
+    });
+
+    test("should still call teardown when async setupEach rejects", async () => {
+        // GIVEN a promise with async setupEach that rejects and a suite-level teardown
+        const givenDuration = 10;
+        const givenIterations = 3;
+        const givenSuiteState = "foo-async-suite";
+        const givenSetupEachError = "foo-async-setupEach-error";
+        mockFunctionProcessTimes(Array(givenIterations).fill(givenDuration));
+        const givenTeardownFn = jest.fn();
+
+        // WHEN async setupEach rejects on the first iteration
+        await expect(
+            expect(async () => await Promise.resolve()).toResolveWithinQuantile(givenDuration, {
+                iterations: givenIterations, quantile: 50,
+                setup: async () => givenSuiteState,
+                setupEach: async () => { throw new Error(givenSetupEachError); },
+                teardown: givenTeardownFn,
+            })
+        ).rejects.toThrowError(givenSetupEachError);
+
+        // THEN teardown is still called via outer try/finally
+        expect(givenTeardownFn).toHaveBeenCalledTimes(1);
+        // AND teardown receives the suite state
+        expect(givenTeardownFn).toHaveBeenCalledWith(givenSuiteState);
+    });
+
+    test("should propagate async teardownEach rejection immediately when teardownEach rejects", async () => {
+        // GIVEN a promise with an async teardownEach hook that rejects
+        const givenDuration = 10;
+        const givenIterations = 3;
+        const givenTeardownEachError = "foo-async-teardownEach-error";
+        mockFunctionProcessTimes(Array(givenIterations).fill(givenDuration));
+
+        // WHEN async teardownEach rejects
+        // THEN the rejection propagates immediately
+        await expect(
+            expect(async () => await Promise.resolve()).toResolveWithinQuantile(givenDuration, {
+                iterations: givenIterations, quantile: 50,
+                teardownEach: async () => { throw new Error(givenTeardownEachError); },
+            })
+        ).rejects.toThrowError(givenTeardownEachError);
+    });
+
+    test("should still call teardown and teardownEach when promise rejects", async () => {
+        // GIVEN a promise that rejects on the first iteration, with suite teardown and per-iteration teardownEach
+        const givenDuration = 10;
+        const givenIterations = 3;
+        const givenSuiteState = "foo-async-suite";
+        const givenPromiseError = "foo-promise-error";
+        mockFunctionProcessTimes(Array(givenIterations).fill(givenDuration));
+        const givenTeardownFn = jest.fn();
+        const givenTeardownEachFn = jest.fn();
+
+        // WHEN the promise rejects on the first iteration
+        await expect(
+            expect(async () => { throw new Error(givenPromiseError); }).toResolveWithinQuantile(givenDuration, {
+                iterations: givenIterations, quantile: 50,
+                setup: async () => givenSuiteState,
+                teardown: givenTeardownFn,
+                teardownEach: givenTeardownEachFn,
+            })
+        ).rejects.toThrowError(givenPromiseError);
+
+        // THEN teardownEach is called once (for the failing iteration)
+        expect(givenTeardownEachFn).toHaveBeenCalledTimes(1);
+        // AND teardown is still called once with the suite state
+        expect(givenTeardownFn).toHaveBeenCalledTimes(1);
+        expect(givenTeardownFn).toHaveBeenCalledWith(givenSuiteState);
+    });
+
+    test("should throw validation error when setupEach is not a function", async () => {
+        // GIVEN an invalid setupEach value that is not a function
+        const givenInvalidSetupEach = 42;
+
+        // WHEN asserting toResolveWithinQuantile with the invalid setupEach
+        // THEN a validation error is thrown
+        await expect(async () => {
+            // @ts-expect-error - intentionally passing invalid setupEach for testing
+            await expect(async () => Promise.resolve()).toResolveWithinQuantile(10, { iterations: 3, quantile: 50, setupEach: givenInvalidSetupEach });
+        }).rejects.toThrowError("jest-performance-matchers: setupEach must be a function if provided, received number");
+    });
+
+    test("should throw validation error when teardownEach is not a function", async () => {
+        // GIVEN an invalid teardownEach value that is not a function
+        const givenInvalidTeardownEach = "foo-not-a-function";
+
+        // WHEN asserting toResolveWithinQuantile with the invalid teardownEach
+        // THEN a validation error is thrown
+        await expect(async () => {
+            // @ts-expect-error - intentionally passing invalid teardownEach for testing
+            await expect(async () => Promise.resolve()).toResolveWithinQuantile(10, { iterations: 3, quantile: 50, teardownEach: givenInvalidTeardownEach });
+        }).rejects.toThrowError("jest-performance-matchers: teardownEach must be a function if provided, received string");
+    });
+
+    test("should show 'setup/teardown active' hint in async .not negation message when setup is provided", async () => {
+        // GIVEN a promise that completes within the budget with a setup hook
+        const givenDuration = 10;
+        const givenIterations = 5;
+        mockFunctionProcessTimes(Array(givenIterations).fill(givenDuration));
+
+        // WHEN using .not negation (expecting the assertion to fail)
+        // THEN the error message includes the 'setup/teardown active' hint
+        await expect(async () => {
+            await expect(async () => await Promise.resolve()).not.toResolveWithinQuantile(givenDuration, {
+                iterations: givenIterations, quantile: 50,
+                setup: () => { /* noop */ },
+            });
+        }).rejects.toThrowError(/setup\/teardown active/);
+    });
+
+    test("should show 'setup/teardown active' hint in async failure message when setup is provided", async () => {
+        // GIVEN a promise that exceeds the budget with a setup hook
+        const givenDuration = 10;
+        const givenIterations = 5;
+        mockFunctionProcessTimes(Array(givenIterations).fill(givenDuration));
+
+        // WHEN the assertion fails
+        let actualMessage = '';
+        try {
+            await expect(async () => await Promise.resolve()).toResolveWithinQuantile(givenDuration - 1, {
+                iterations: givenIterations, quantile: 50,
+                setup: () => { /* noop */ },
+            });
+        } catch (e) {
+            actualMessage = (e as Error).message;
+        }
+
+        // THEN the stats block includes the 'setup/teardown active' hint
+        expect(actualMessage).toContain('setup/teardown active');
+    });
+
+    test("should pass async setup and setupEach return values to callback and teardownEach when all hooks are provided", async () => {
+        // GIVEN a promise with all four async hooks that return and receive values
+        const givenDuration = 10;
+        const givenIterations = 2;
+        mockFunctionProcessTimes(Array(givenIterations).fill(givenDuration));
+        const givenSuiteData = "foo-async-suite";
+        let givenIterCounter = 0;
+        const actualCallbackArgs: unknown[][] = [];
+        const actualTeardownEachArgs: unknown[][] = [];
+        let actualTeardownArg: unknown;
+
+        // WHEN asserting toResolveWithinQuantile with all four hooks
+        await expect(async (suiteState: unknown, iterState: unknown) => {
+            actualCallbackArgs.push([suiteState, iterState]);
+        }).toResolveWithinQuantile(givenDuration, {
+            iterations: givenIterations, quantile: 50,
+            setup: async () => givenSuiteData,
+            setupEach: async (suiteState) => { return ++givenIterCounter; },
+            teardownEach: (suiteState, iterState) => { actualTeardownEachArgs.push([suiteState, iterState]); },
+            teardown: (suiteState) => { actualTeardownArg = suiteState; },
+        });
+
+        // THEN callback receives both suite state and iter state
+        expect(actualCallbackArgs).toEqual([[givenSuiteData, 1], [givenSuiteData, 2]]);
+        // AND teardownEach receives both
+        expect(actualTeardownEachArgs).toEqual([[givenSuiteData, 1], [givenSuiteData, 2]]);
+        // AND teardown receives suite state only
+        expect(actualTeardownArg).toBe(givenSuiteData);
+    });
+
+    test("should pass async setup return value during warmup iterations when warmup is configured", async () => {
+        // GIVEN a promise with async suite-level setup and per-iteration setupEach, with warmup
+        const givenDuration = 10;
+        const givenIterations = 2;
+        const givenWarmup = 2;
+        const givenSuiteState = "foo-async-suite";
+        mockFunctionProcessTimes(Array(givenIterations).fill(givenDuration));
+        let givenIterCounter = 0;
+        const actualCallbackArgs: unknown[][] = [];
+
+        // WHEN asserting toResolveWithinQuantile with warmup
+        await expect(async (suiteState: unknown, iterState: unknown) => {
+            actualCallbackArgs.push([suiteState, iterState]);
+        }).toResolveWithinQuantile(givenDuration, {
+            iterations: givenIterations, quantile: 50, warmup: givenWarmup,
+            setup: async () => givenSuiteState,
+            setupEach: async () => ++givenIterCounter,
+        });
+
+        // THEN warmup (2) + measured (2) = 4 calls, all receive suite state and fresh iter state
+        expect(actualCallbackArgs).toEqual([
+            [givenSuiteState, 1], [givenSuiteState, 2], [givenSuiteState, 3], [givenSuiteState, 4],
+        ]);
+    });
+
 });
 
 describe("Benchmark log interpretability annotations", () => {
@@ -1254,6 +2433,34 @@ describe("Input validation", () => {
                 expect(() => undefined).toCompleteWithinQuantile(10, {iterations: 5, quantile: 95, outliers: 'invalid' as 'remove' | 'keep'});
             }).toThrowError("jest-performance-matchers: outliers must be 'remove' or 'keep', received 'invalid'");
         });
+
+        test("should throw when setup is not a function", () => {
+            expect(() => {
+                // @ts-expect-error - intentionally passing invalid setup for testing
+                expect(() => undefined).toCompleteWithinQuantile(10, {iterations: 5, quantile: 95, setup: "not a function"});
+            }).toThrowError("jest-performance-matchers: setup must be a function if provided, received string");
+        });
+
+        test("should throw when setup is null", () => {
+            expect(() => {
+                // @ts-expect-error - intentionally passing invalid setup for testing
+                expect(() => undefined).toCompleteWithinQuantile(10, {iterations: 5, quantile: 95, setup: null});
+            }).toThrowError("jest-performance-matchers: setup must be a function if provided, received object");
+        });
+
+        test("should throw when teardown is not a function", () => {
+            expect(() => {
+                // @ts-expect-error - intentionally passing invalid teardown for testing
+                expect(() => undefined).toCompleteWithinQuantile(10, {iterations: 5, quantile: 95, teardown: 42});
+            }).toThrowError("jest-performance-matchers: teardown must be a function if provided, received number");
+        });
+
+        test("should throw when teardown is null", () => {
+            expect(() => {
+                // @ts-expect-error - intentionally passing invalid teardown for testing
+                expect(() => undefined).toCompleteWithinQuantile(10, {iterations: 5, quantile: 95, teardown: null});
+            }).toThrowError("jest-performance-matchers: teardown must be a function if provided, received object");
+        });
     });
 
     describe("toResolveWithinQuantile", () => {
@@ -1275,6 +2482,20 @@ describe("Input validation", () => {
             await expect(async () => {
                 await expect(async () => Promise.resolve()).toResolveWithinQuantile(10, {iterations: -1, quantile: 95});
             }).rejects.toThrowError("jest-performance-matchers: iterations must be a positive integer, received -1");
+        });
+
+        test("should throw when setup is not a function", async () => {
+            await expect(async () => {
+                // @ts-expect-error - intentionally passing invalid setup for testing
+                await expect(async () => Promise.resolve()).toResolveWithinQuantile(10, {iterations: 5, quantile: 95, setup: "not a function"});
+            }).rejects.toThrowError("jest-performance-matchers: setup must be a function if provided, received string");
+        });
+
+        test("should throw when teardown is not a function", async () => {
+            await expect(async () => {
+                // @ts-expect-error - intentionally passing invalid teardown for testing
+                await expect(async () => Promise.resolve()).toResolveWithinQuantile(10, {iterations: 5, quantile: 95, teardown: 42});
+            }).rejects.toThrowError("jest-performance-matchers: teardown must be a function if provided, received number");
         });
     });
 });
