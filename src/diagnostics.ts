@@ -104,12 +104,58 @@ export function classifySampleAdequacy(n: number): Tag {
  * exceeds the user's threshold — flagging a potential budget overrun even
  * when the quantile assertion passes.
  */
-export function generateInterpretation(stats: Stats, expectedDuration?: number): string {
+function interpretPoorCV(rmeTag: Tag, cvTag: Tag, madTag: Tag | null, context: 'approximate' | 'precise'): string {
+    const madSuffix = madTag !== null ? `, MAD: ${formatTag(madTag)}` : '';
+    if (madTag !== null && madTag.label !== 'POOR') {
+        const action = context === 'approximate'
+            ? 'enable outlier removal and increase iterations'
+            : "enable outlier removal via { outliers: 'remove' }";
+        return `mean is ${context === 'approximate' ? 'approximate and' : 'precise but'} outliers are inflating variance (RME: ${formatTag(rmeTag)}, CV: ${formatTag(cvTag)}, MAD: ${formatTag(madTag)}) — ${action}`;
+    }
+    const action = context === 'approximate'
+        ? 'increase iterations and investigate environment stability'
+        : 'investigate noise sources (GC, I/O, scheduling)';
+    return `mean is ${context === 'approximate' ? 'approximate and' : 'precise but'} ${context === 'approximate' ? 'most runs vary widely' : 'runs are genuinely inconsistent'} (RME: ${formatTag(rmeTag)}, CV: ${formatTag(cvTag)}${madSuffix}) — ${action}`;
+}
+
+function classifyReliability(rme: Tag, cv: Tag, mad: Tag | null, sample: Tag): string {
+    const remedy = 'try increasing iterations, adding warmup, or enabling outlier removal';
+
+    if (rme.label === 'POOR') {
+        const sampleNote = sample.label !== 'GOOD' ? ` with ${sample.label} sample size` : '';
+        return `mean is not reliable (RME: ${formatTag(rme)}, CV: ${formatTag(cv)})${sampleNote}. ${remedy}`;
+    }
+    if (rme.label === 'FAIR' && cv.label === 'POOR') {
+        return interpretPoorCV(rme, cv, mad, 'approximate');
+    }
+    if (rme.label === 'FAIR') {
+        return `results are usable for rough comparison (RME: ${formatTag(rme)}, CV: ${formatTag(cv)}) — increase iterations for tighter estimates`;
+    }
+    if (cv.label === 'POOR') {
+        return interpretPoorCV(rme, cv, mad, 'precise');
+    }
+    if (cv.label === 'FAIR') {
+        return `results are reliable (RME: ${formatTag(rme)}, CV: ${formatTag(cv)}) — moderate run-to-run variance is expected`;
+    }
+    return `results are precise and consistent (RME: ${formatTag(rme)}, CV: ${formatTag(cv)}) — safe for regression detection`;
+}
+
+function appendCICheck(message: string, ci: [number, number], expectedDuration: number): string {
+    const [lower, upper] = ci;
+    if (lower > expectedDuration) {
+        return message + `. CI range [${lower.toFixed(2)}, ${upper.toFixed(2)}]ms is entirely above your ${expectedDuration}ms threshold — the code is almost certainly too slow`;
+    }
+    if (upper > expectedDuration) {
+        return message + `. CI upper bound (${upper.toFixed(2)}ms) exceeds your ${expectedDuration}ms threshold — the true mean likely exceeds your budget, consider optimizing the code or raising the threshold`;
+    }
+    return message + `. CI range [${lower.toFixed(2)}, ${upper.toFixed(2)}]ms is within your ${expectedDuration}ms threshold — the mean is safely within budget`;
+}
+
+export function generateInterpretation(stats: Stats, expectedDuration?: number, errorInfo?: { errorCount: number; totalIterations: number; allowedRate: number }): string {
     const rme = classifyRME(stats.relativeMarginOfError);
     const cv = classifyCV(stats.coefficientOfVariation);
     const mad = classifyMAD(stats.mad, stats.median);
     const sample = classifySampleAdequacy(stats.n);
-    const remedy = 'try increasing iterations, adding warmup, or enabling outlier removal';
 
     if (stats.confidenceInterval === null) {
         return 'results are unreliable — insufficient data for statistical analysis. Add more iterations to enable confidence intervals';
@@ -118,41 +164,14 @@ export function generateInterpretation(stats: Stats, expectedDuration?: number):
         return 'relative error cannot be computed (mean ≈ 0) — RME and CV are unavailable when the mean is zero';
     }
 
-    let message: string;
-
-    if (rme.label === 'POOR') {
-        const sampleNote = sample.label !== 'GOOD' ? ` with ${sample.label} sample size` : '';
-        message = `mean is not reliable (RME: ${formatTag(rme)}, CV: ${formatTag(cv!)})${sampleNote}. ${remedy}`;
-    } else if (rme.label === 'FAIR' && cv!.label === 'POOR') {
-        if (mad !== null && mad.label !== 'POOR') {
-            message = `mean is approximate and outliers are inflating variance (RME: ${formatTag(rme)}, CV: ${formatTag(cv!)}, MAD: ${formatTag(mad)}) — enable outlier removal and increase iterations`;
-        } else {
-            message = `mean is approximate and most runs vary widely (RME: ${formatTag(rme)}, CV: ${formatTag(cv!)}${mad !== null ? `, MAD: ${formatTag(mad)}` : ''}) — increase iterations and investigate environment stability`;
-        }
-    } else if (rme.label === 'FAIR') {
-        message = `results are usable for rough comparison (RME: ${formatTag(rme)}, CV: ${formatTag(cv!)}) — increase iterations for tighter estimates`;
-    } else if (cv!.label === 'POOR') {
-        if (mad !== null && mad.label !== 'POOR') {
-            message = `mean is precise but outliers are inflating variance (RME: ${formatTag(rme)}, CV: ${formatTag(cv!)}, MAD: ${formatTag(mad)}) — enable outlier removal via { outliers: 'remove' }`;
-        } else {
-            message = `mean is precise but runs are genuinely inconsistent (RME: ${formatTag(rme)}, CV: ${formatTag(cv!)}${mad !== null ? `, MAD: ${formatTag(mad)}` : ''}) — investigate noise sources (GC, I/O, scheduling)`;
-        }
-    } else if (cv!.label === 'FAIR') {
-        message = `results are reliable (RME: ${formatTag(rme)}, CV: ${formatTag(cv!)}) — moderate run-to-run variance is expected`;
-    } else {
-        message = `results are precise and consistent (RME: ${formatTag(rme)}, CV: ${formatTag(cv!)}) — safe for regression detection`;
-    }
+    let message = classifyReliability(rme, cv!, mad, sample);
 
     if (expectedDuration !== undefined && stats.confidenceInterval !== null) {
-        const lower = stats.confidenceInterval[0];
-        const upper = stats.confidenceInterval[1];
-        if (lower > expectedDuration) {
-            message += `. CI range [${lower.toFixed(2)}, ${upper.toFixed(2)}]ms is entirely above your ${expectedDuration}ms threshold — the code is almost certainly too slow`;
-        } else if (upper > expectedDuration) {
-            message += `. CI upper bound (${upper.toFixed(2)}ms) exceeds your ${expectedDuration}ms threshold — the true mean likely exceeds your budget, consider optimizing the code or raising the threshold`;
-        } else {
-            message += `. CI range [${lower.toFixed(2)}, ${upper.toFixed(2)}]ms is within your ${expectedDuration}ms threshold — the mean is safely within budget`;
-        }
+        message = appendCICheck(message, stats.confidenceInterval, expectedDuration);
+    }
+
+    if (errorInfo !== undefined && errorInfo.errorCount > 0) {
+        message += `. Note: ${errorInfo.errorCount} of ${errorInfo.totalIterations} iterations were excluded due to errors — stats reflect successful runs only`;
     }
 
     return message;

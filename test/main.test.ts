@@ -9,7 +9,7 @@ function mockFunctionProcessTime(milliseconds: number) {
     mockFunctionProcessTimes([milliseconds]);
 }
 
-function buildStatsBlock(durations: number[], expectedDuration?: number, setupTeardownActive?: boolean): string {
+function buildStatsBlock(durations: number[], expectedDuration?: number, setupTeardownActive?: boolean, errorInfo?: { errorCount: number; totalIterations: number; allowedRate: number }): string {
     const stats = metrics.calcStats(durations);
     const fmt = (v: number | null) => v !== null ? v.toFixed(2) : 'N/A';
 
@@ -48,8 +48,14 @@ function buildStatsBlock(durations: number[], expectedDuration?: number, setupTe
         `Distribution: min=${fmt(stats.min)}ms | P25=${fmt(p25)}ms | P50=${fmt(p50)}ms | P75=${fmt(p75)}ms | P90=${fmt(p90)}ms | max=${fmt(stats.max)}ms`,
         `Shape: ${shapeDiag.label} (skewness=${skewnessText}) | ${shapeDiag.sparkline}`,
         `Sample adequacy: ${formatTag(classifySampleAdequacy(stats.n))} (n=${stats.n})`,
-        `Interpretation: ${generateInterpretation(stats, expectedDuration)}`,
+        `Interpretation: ${generateInterpretation(stats, expectedDuration, errorInfo)}`,
     ];
+
+    if (errorInfo !== undefined && errorInfo.errorCount > 0) {
+        const actualRate = (errorInfo.errorCount / errorInfo.totalIterations * 100).toFixed(1);
+        const allowedRate = (errorInfo.allowedRate * 100).toFixed(1);
+        lines.push(`Error rate: ${errorInfo.errorCount}/${errorInfo.totalIterations} (${actualRate}%) [within ${allowedRate}% tolerance]`);
+    }
 
     if (stats.warnings.length > 0) {
         lines.push('Warnings:');
@@ -1738,6 +1744,489 @@ describe("Setup/teardown options (async)", () => {
 
 });
 
+describe("Error rate tolerance (sync)", () => {
+    beforeEach(() => {
+        jest.restoreAllMocks();
+    });
+
+    test("should pass the assertion when error rate is within tolerance", () => {
+        // GIVEN a callback that fails 3 of 10 iterations
+        const givenIterations = 10;
+        const givenAllowedErrorRate = 0.5;
+        const givenFailCount = 3;
+        let callCount = 0;
+        mockFunctionProcessTimes(Array(givenIterations).fill(10));
+
+        // WHEN asserting with allowedErrorRate above the actual failure rate
+        // THEN the assertion passes (30% < 50%)
+        expect((..._args: unknown[]) => {
+            callCount++;
+            if (callCount <= givenFailCount) throw new Error("foo-transient-error");
+        }).toCompleteWithinQuantile(10, {
+            iterations: givenIterations, quantile: 50, allowedErrorRate: givenAllowedErrorRate,
+        });
+    });
+
+    test("should fail the assertion when error rate exceeds tolerance", () => {
+        // GIVEN a callback that fails 6 of 10 iterations
+        const givenIterations = 10;
+        const givenAllowedErrorRate = 0.3;
+        const givenFailCount = 6;
+        let callCount = 0;
+        mockFunctionProcessTimes(Array(givenIterations).fill(10));
+
+        // WHEN asserting with allowedErrorRate below the actual failure rate
+        // THEN the assertion fails with a descriptive error rate message
+        expect(() => {
+            expect((..._args: unknown[]) => {
+                callCount++;
+                if (callCount <= givenFailCount) throw new Error("foo-transient-error");
+            }).toCompleteWithinQuantile(10, {
+                iterations: givenIterations, quantile: 50, allowedErrorRate: givenAllowedErrorRate,
+            });
+        }).toThrowError(/error rate 6\/10 \(60\.0%\) exceeds allowed 30\.0%/);
+    });
+
+    test("should propagate error immediately when allowedErrorRate is not set (default 0)", () => {
+        // GIVEN a callback that always throws and no allowedErrorRate option
+        mockFunctionProcessTimes(Array(10).fill(10));
+        const givenError = new Error("foo-callback-error");
+
+        // WHEN the callback throws during iteration
+        // THEN the error propagates immediately (backward compatible)
+        expect(() => {
+            expect((..._args: unknown[]) => { throw givenError; }).toCompleteWithinQuantile(10, {
+                iterations: 10, quantile: 50,
+            });
+        }).toThrowError(givenError.message);
+    });
+
+    test("should propagate error immediately when allowedErrorRate is explicitly 0", () => {
+        // GIVEN a callback that always throws with allowedErrorRate explicitly set to 0
+        mockFunctionProcessTimes(Array(10).fill(10));
+        const givenError = new Error("foo-callback-error");
+
+        // WHEN the callback throws during iteration
+        // THEN the error propagates immediately (same as default)
+        expect(() => {
+            expect((..._args: unknown[]) => { throw givenError; }).toCompleteWithinQuantile(10, {
+                iterations: 10, quantile: 50, allowedErrorRate: 0,
+            });
+        }).toThrowError(givenError.message);
+    });
+
+    test("should fail with all-failed message when every iteration throws", () => {
+        // GIVEN a callback that always throws with maximum error tolerance
+        const givenIterations = 5;
+        const givenAllowedErrorRate = 1.0;
+        mockFunctionProcessTimes(Array(givenIterations).fill(10));
+
+        // WHEN all iterations fail
+        // THEN the matcher fails with a descriptive all-failed message
+        expect(() => {
+            expect((..._args: unknown[]) => { throw new Error("foo-always-fails"); }).toCompleteWithinQuantile(10, {
+                iterations: givenIterations, quantile: 50, allowedErrorRate: givenAllowedErrorRate,
+            });
+        }).toThrowError(/all 5 iterations failed \(100% error rate, allowed 100\.0%\)/);
+    });
+
+    test("should call teardown when all iterations fail", () => {
+        // GIVEN a callback that always throws and a teardown spy
+        const givenIterations = 5;
+        const givenSetupState = "foo-suite-state";
+        mockFunctionProcessTimes(Array(givenIterations).fill(10));
+        const givenTeardown = jest.fn();
+
+        // WHEN all iterations fail
+        expect(() => {
+            expect((..._args: unknown[]) => { throw new Error("foo-always-fails"); }).toCompleteWithinQuantile(10, {
+                iterations: givenIterations, quantile: 50, allowedErrorRate: 1.0,
+                setup: () => givenSetupState,
+                teardown: givenTeardown,
+            });
+        }).toThrowError(/all 5 iterations failed/);
+
+        // THEN teardown is still called with the setup state
+        expect(givenTeardown).toHaveBeenCalledTimes(1);
+        expect(givenTeardown).toHaveBeenCalledWith(givenSetupState);
+    });
+
+    test("should call teardown when error rate is exceeded", () => {
+        // GIVEN a callback that fails 6 of 10 iterations and a teardown spy
+        const givenIterations = 10;
+        const givenFailCount = 6;
+        let callCount = 0;
+        mockFunctionProcessTimes(Array(givenIterations).fill(10));
+        const givenTeardown = jest.fn();
+
+        // WHEN the error rate exceeds the threshold
+        expect(() => {
+            expect((..._args: unknown[]) => {
+                callCount++;
+                if (callCount <= givenFailCount) throw new Error("foo-transient-error");
+            }).toCompleteWithinQuantile(10, {
+                iterations: givenIterations, quantile: 50, allowedErrorRate: 0.3,
+                setup: () => "foo-state",
+                teardown: givenTeardown,
+            });
+        }).toThrowError(/error rate/);
+
+        // THEN teardown is still called
+        expect(givenTeardown).toHaveBeenCalledTimes(1);
+    });
+
+    test("should propagate setupEach error as fatal when allowedErrorRate is set", () => {
+        // GIVEN a setupEach that throws with error tolerance enabled
+        mockFunctionProcessTimes(Array(10).fill(10));
+        const givenError = new Error("foo-setupEach-error");
+
+        // WHEN setupEach throws
+        // THEN the error propagates immediately (not counted toward error rate)
+        expect(() => {
+            expect((..._args: unknown[]) => undefined).toCompleteWithinQuantile(10, {
+                iterations: 10, quantile: 50, allowedErrorRate: 0.5,
+                setupEach: () => { throw givenError; },
+            });
+        }).toThrowError(givenError.message);
+    });
+
+    test("should propagate teardownEach error as fatal when allowedErrorRate is set", () => {
+        // GIVEN a teardownEach that throws with error tolerance enabled
+        mockFunctionProcessTimes(Array(10).fill(10));
+        const givenError = new Error("foo-teardownEach-error");
+
+        // WHEN teardownEach throws
+        // THEN the error propagates immediately (not counted toward error rate)
+        expect(() => {
+            expect((..._args: unknown[]) => undefined).toCompleteWithinQuantile(10, {
+                iterations: 10, quantile: 50, allowedErrorRate: 0.5,
+                teardownEach: () => { throw givenError; },
+            });
+        }).toThrowError(givenError.message);
+    });
+
+    test("should include error rate line in diagnostics when errors occur within tolerance", () => {
+        // GIVEN a callback that fails 2 of 10 iterations within tolerance
+        const givenIterations = 10;
+        const givenFailCount = 2;
+        const givenAllowedErrorRate = 0.5;
+        let callCount = 0;
+        mockFunctionProcessTimes(Array(givenIterations).fill(10));
+
+        // WHEN the quantile matcher fails (duration exceeds threshold)
+        let actualMessage = '';
+        try {
+            expect((..._args: unknown[]) => {
+                callCount++;
+                if (callCount <= givenFailCount) throw new Error("foo-transient-error");
+            }).toCompleteWithinQuantile(5, {
+                iterations: givenIterations, quantile: 50, allowedErrorRate: givenAllowedErrorRate,
+            });
+        } catch (e) {
+            actualMessage = (e as Error).message;
+        }
+
+        // THEN the error rate line appears in the diagnostics
+        const expectedErrorRateLine = 'Error rate: 2/10 (20.0%) [within 50.0% tolerance]';
+        expect(actualMessage).toContain(expectedErrorRateLine);
+    });
+
+    test("should not include error rate line when no errors occur with allowedErrorRate set", () => {
+        // GIVEN a callback that never throws with allowedErrorRate set
+        mockFunctionProcessTimes(Array(5).fill(10));
+
+        // WHEN the assertion passes with no errors
+        let actualMessage = '';
+        try {
+            expect((..._args: unknown[]) => undefined).toCompleteWithinQuantile(5, {
+                iterations: 5, quantile: 50, allowedErrorRate: 0.1,
+            });
+        } catch (e) {
+            actualMessage = (e as Error).message;
+        }
+
+        // THEN no error rate line appears
+        expect(actualMessage).not.toContain('Error rate:');
+    });
+
+    test("should note excluded runs in interpretation when errors occur", () => {
+        // GIVEN a callback that fails 2 of 10 iterations
+        const givenIterations = 10;
+        const givenFailCount = 2;
+        let callCount = 0;
+        mockFunctionProcessTimes(Array(givenIterations).fill(10));
+
+        // WHEN the quantile matcher produces diagnostics
+        let actualMessage = '';
+        try {
+            expect((..._args: unknown[]) => {
+                callCount++;
+                if (callCount <= givenFailCount) throw new Error("foo-transient-error");
+            }).toCompleteWithinQuantile(5, {
+                iterations: givenIterations, quantile: 50, allowedErrorRate: 0.5,
+            });
+        } catch (e) {
+            actualMessage = (e as Error).message;
+        }
+
+        // THEN the interpretation notes the excluded runs
+        expect(actualMessage).toContain(`${givenFailCount} of ${givenIterations} iterations were excluded due to errors`);
+    });
+
+    test("should compute stats on successful runs only when errors reduce n", () => {
+        // GIVEN a callback that fails 2 of 5 iterations
+        const givenIterations = 5;
+        const givenFailCount = 2;
+        const expectedSuccessfulN = givenIterations - givenFailCount;
+        let callCount = 0;
+        mockFunctionProcessTimes(Array(givenIterations).fill(10));
+
+        // WHEN the quantile matcher produces diagnostics
+        let actualMessage = '';
+        try {
+            expect((..._args: unknown[]) => {
+                callCount++;
+                if (callCount <= givenFailCount) throw new Error("foo-transient-error");
+            }).toCompleteWithinQuantile(5, {
+                iterations: givenIterations, quantile: 50, allowedErrorRate: 0.5,
+            });
+        } catch (e) {
+            actualMessage = (e as Error).message;
+        }
+
+        // THEN stats reflect only successful runs
+        expect(actualMessage).toContain(`Statistics (n=${expectedSuccessfulN}`);
+    });
+
+    test("should fail when all successful iterations are removed as outliers after error exclusion", () => {
+        // GIVEN a callback that fails 5 of 10 iterations and removeOutliers returns empty
+        const givenIterations = 10;
+        const givenFailCount = 5;
+        let callCount = 0;
+        mockFunctionProcessTimes(Array(givenIterations).fill(10));
+        jest.spyOn(metrics, 'removeOutliers').mockReturnValue([]);
+
+        // WHEN outlier removal empties the remaining durations
+        // THEN the matcher fails with a descriptive message
+        expect(() => {
+            expect((..._args: unknown[]) => {
+                callCount++;
+                if (callCount <= givenFailCount) throw new Error("foo-transient-error");
+            }).toCompleteWithinQuantile(10, {
+                iterations: givenIterations, quantile: 50, allowedErrorRate: 0.6, outliers: 'remove',
+            });
+        }).toThrowError(/all \d+ successful iterations were removed as outliers/);
+    });
+
+    test("should propagate warmup error as fatal when allowedErrorRate is set", () => {
+        // GIVEN a callback that throws during warmup with error tolerance enabled
+        mockFunctionProcessTimes(Array(10).fill(10));
+        const givenError = new Error("foo-warmup-error");
+        let givenWarmupDone = false;
+
+        // WHEN the callback throws during warmup
+        // THEN the error propagates immediately (warmup errors are always fatal)
+        expect(() => {
+            expect((..._args: unknown[]) => {
+                if (!givenWarmupDone) throw givenError;
+            }).toCompleteWithinQuantile(10, {
+                iterations: 5, quantile: 50, warmup: 1, allowedErrorRate: 0.5,
+            });
+        }).toThrowError(givenError.message);
+    });
+});
+
+describe("Error rate tolerance (async)", () => {
+    beforeEach(() => {
+        jest.restoreAllMocks();
+    });
+
+    test("should pass the assertion when error rate is within tolerance", async () => {
+        // GIVEN an async callback that fails 3 of 10 iterations
+        const givenIterations = 10;
+        const givenAllowedErrorRate = 0.5;
+        const givenFailCount = 3;
+        let callCount = 0;
+        mockFunctionProcessTimes(Array(givenIterations).fill(10));
+
+        // WHEN asserting with allowedErrorRate above the actual failure rate
+        // THEN the assertion passes
+        await expect(async (..._args: unknown[]) => {
+            callCount++;
+            if (callCount <= givenFailCount) throw new Error("foo-transient-error");
+        }).toResolveWithinQuantile(10, {
+            iterations: givenIterations, quantile: 50, allowedErrorRate: givenAllowedErrorRate,
+        });
+    });
+
+    test("should fail the assertion when error rate exceeds tolerance", async () => {
+        // GIVEN an async callback that fails 6 of 10 iterations
+        const givenIterations = 10;
+        const givenAllowedErrorRate = 0.3;
+        const givenFailCount = 6;
+        let callCount = 0;
+        mockFunctionProcessTimes(Array(givenIterations).fill(10));
+
+        // WHEN asserting with allowedErrorRate below the actual failure rate
+        let actualMessage = '';
+        try {
+            await expect(async (..._args: unknown[]) => {
+                callCount++;
+                if (callCount <= givenFailCount) throw new Error("foo-transient-error");
+            }).toResolveWithinQuantile(10, {
+                iterations: givenIterations, quantile: 50, allowedErrorRate: givenAllowedErrorRate,
+            });
+        } catch (e) {
+            actualMessage = (e as Error).message;
+        }
+
+        // THEN the failure message contains the error rate
+        expect(actualMessage).toContain(`error rate ${givenFailCount}/${givenIterations} (60.0%) exceeds allowed 30.0%`);
+    });
+
+    test("should propagate error immediately when allowedErrorRate is not set (default 0)", async () => {
+        // GIVEN an async callback that always throws and no allowedErrorRate option
+        mockFunctionProcessTimes(Array(10).fill(10));
+        const givenError = new Error("foo-async-callback-error");
+
+        // WHEN the callback throws during iteration
+        // THEN the error propagates immediately
+        await expect(
+            expect(async (..._args: unknown[]) => { throw givenError; }).toResolveWithinQuantile(10, {
+                iterations: 10, quantile: 50,
+            })
+        ).rejects.toThrowError(givenError.message);
+    });
+
+    test("should fail with all-failed message when every iteration throws", async () => {
+        // GIVEN an async callback that always throws with maximum error tolerance
+        const givenIterations = 5;
+        mockFunctionProcessTimes(Array(givenIterations).fill(10));
+
+        // WHEN all iterations fail
+        let actualMessage = '';
+        try {
+            await expect(async (..._args: unknown[]) => { throw new Error("foo-always-fails"); }).toResolveWithinQuantile(10, {
+                iterations: givenIterations, quantile: 50, allowedErrorRate: 1.0,
+            });
+        } catch (e) {
+            actualMessage = (e as Error).message;
+        }
+
+        // THEN the failure message indicates all iterations failed
+        expect(actualMessage).toContain(`all ${givenIterations} iterations failed`);
+    });
+
+    test("should fail when all successful iterations are removed as outliers after error exclusion", async () => {
+        // GIVEN an async callback that fails 5 of 10 iterations and removeOutliers returns empty
+        const givenIterations = 10;
+        const givenFailCount = 5;
+        let callCount = 0;
+        mockFunctionProcessTimes(Array(givenIterations).fill(10));
+        jest.spyOn(metrics, 'removeOutliers').mockReturnValue([]);
+
+        // WHEN outlier removal empties the remaining durations
+        let actualMessage = '';
+        try {
+            await expect(async (..._args: unknown[]) => {
+                callCount++;
+                if (callCount <= givenFailCount) throw new Error("foo-transient-error");
+            }).toResolveWithinQuantile(10, {
+                iterations: givenIterations, quantile: 50, allowedErrorRate: 0.6, outliers: 'remove',
+            });
+        } catch (e) {
+            actualMessage = (e as Error).message;
+        }
+
+        // THEN the matcher fails with a descriptive message
+        expect(actualMessage).toContain('successful iterations were removed as outliers');
+    });
+
+    test("should call teardown when all iterations fail", async () => {
+        // GIVEN an async callback that always throws and a teardown spy
+        const givenIterations = 5;
+        const givenSetupState = "foo-suite-state";
+        mockFunctionProcessTimes(Array(givenIterations).fill(10));
+        const givenTeardown = jest.fn();
+
+        // WHEN all iterations fail
+        try {
+            await expect(async (..._args: unknown[]) => { throw new Error("foo-always-fails"); }).toResolveWithinQuantile(10, {
+                iterations: givenIterations, quantile: 50, allowedErrorRate: 1.0,
+                setup: () => givenSetupState,
+                teardown: givenTeardown,
+            });
+        } catch {
+            // expected
+        }
+
+        // THEN teardown is still called with the setup state
+        expect(givenTeardown).toHaveBeenCalledTimes(1);
+        expect(givenTeardown).toHaveBeenCalledWith(givenSetupState);
+    });
+
+    test("should propagate setupEach error as fatal when allowedErrorRate is set", async () => {
+        // GIVEN an async setupEach that rejects with error tolerance enabled
+        mockFunctionProcessTimes(Array(10).fill(10));
+        const givenError = new Error("foo-async-setupEach-error");
+
+        // WHEN setupEach rejects
+        // THEN the error propagates immediately (not counted toward error rate)
+        await expect(
+            expect(async (..._args: unknown[]) => undefined).toResolveWithinQuantile(10, {
+                iterations: 10, quantile: 50, allowedErrorRate: 0.5,
+                setupEach: async () => { throw givenError; },
+            })
+        ).rejects.toThrowError(givenError.message);
+    });
+
+    test("should propagate teardownEach error as fatal when allowedErrorRate is set", async () => {
+        // GIVEN an async teardownEach that rejects with error tolerance enabled
+        mockFunctionProcessTimes(Array(10).fill(10));
+        const givenError = new Error("foo-async-teardownEach-error");
+
+        // WHEN teardownEach rejects
+        // THEN the error propagates immediately (not counted toward error rate)
+        await expect(
+            expect(async (..._args: unknown[]) => undefined).toResolveWithinQuantile(10, {
+                iterations: 10, quantile: 50, allowedErrorRate: 0.5,
+                teardownEach: async () => { throw givenError; },
+            })
+        ).rejects.toThrowError(givenError.message);
+    });
+
+    test("should propagate warmup error as fatal when allowedErrorRate is set", async () => {
+        // GIVEN an async callback that throws during warmup with error tolerance enabled
+        mockFunctionProcessTimes(Array(10).fill(10));
+        const givenError = new Error("foo-async-warmup-error");
+        let givenWarmupDone = false;
+
+        // WHEN the callback throws during warmup
+        // THEN the error propagates immediately (warmup errors are always fatal)
+        await expect(
+            expect(async (..._args: unknown[]) => {
+                if (!givenWarmupDone) throw givenError;
+            }).toResolveWithinQuantile(10, {
+                iterations: 5, quantile: 50, warmup: 1, allowedErrorRate: 0.5,
+            })
+        ).rejects.toThrowError(givenError.message);
+    });
+
+    test("should propagate error immediately when allowedErrorRate is explicitly 0", async () => {
+        // GIVEN an async callback that always throws with allowedErrorRate explicitly set to 0
+        mockFunctionProcessTimes(Array(10).fill(10));
+        const givenError = new Error("foo-async-callback-error");
+
+        // WHEN the callback throws during iteration
+        // THEN the error propagates immediately (same as default)
+        await expect(
+            expect(async (..._args: unknown[]) => { throw givenError; }).toResolveWithinQuantile(10, {
+                iterations: 10, quantile: 50, allowedErrorRate: 0,
+            })
+        ).rejects.toThrowError(givenError.message);
+    });
+});
+
 describe("Benchmark log interpretability annotations", () => {
     beforeEach(() => {
         jest.restoreAllMocks();
@@ -2461,6 +2950,46 @@ describe("Input validation", () => {
                 expect(() => undefined).toCompleteWithinQuantile(10, {iterations: 5, quantile: 95, teardown: null});
             }).toThrowError("jest-performance-matchers: teardown must be a function if provided, received object");
         });
+
+        test("should throw a validation error when allowedErrorRate is negative", () => {
+            // GIVEN a negative allowedErrorRate
+            const givenAllowedErrorRate = -0.1;
+
+            // WHEN asserting with the invalid rate
+            // THEN a descriptive error is thrown
+            expect(() => {
+                expect(() => undefined).toCompleteWithinQuantile(10, {iterations: 5, quantile: 95, allowedErrorRate: givenAllowedErrorRate});
+            }).toThrowError(`jest-performance-matchers: allowedErrorRate must be a number between 0 and 1, received ${givenAllowedErrorRate}`);
+        });
+
+        test("should throw a validation error when allowedErrorRate exceeds 1", () => {
+            // GIVEN an allowedErrorRate above the maximum
+            const givenAllowedErrorRate = 1.1;
+
+            // WHEN asserting with the invalid rate
+            // THEN a descriptive error is thrown
+            expect(() => {
+                expect(() => undefined).toCompleteWithinQuantile(10, {iterations: 5, quantile: 95, allowedErrorRate: givenAllowedErrorRate});
+            }).toThrowError(`jest-performance-matchers: allowedErrorRate must be a number between 0 and 1, received ${givenAllowedErrorRate}`);
+        });
+
+        test("should throw a validation error when allowedErrorRate is NaN", () => {
+            // GIVEN NaN as allowedErrorRate
+            // WHEN asserting with the invalid rate
+            // THEN a descriptive error is thrown
+            expect(() => {
+                expect(() => undefined).toCompleteWithinQuantile(10, {iterations: 5, quantile: 95, allowedErrorRate: NaN});
+            }).toThrowError("jest-performance-matchers: allowedErrorRate must be a number between 0 and 1, received NaN");
+        });
+
+        test("should throw a validation error when allowedErrorRate is Infinity", () => {
+            // GIVEN Infinity as allowedErrorRate
+            // WHEN asserting with the invalid rate
+            // THEN a descriptive error is thrown
+            expect(() => {
+                expect(() => undefined).toCompleteWithinQuantile(10, {iterations: 5, quantile: 95, allowedErrorRate: Infinity});
+            }).toThrowError("jest-performance-matchers: allowedErrorRate must be a number between 0 and 1, received Infinity");
+        });
     });
 
     describe("toResolveWithinQuantile", () => {
@@ -2496,6 +3025,46 @@ describe("Input validation", () => {
                 // @ts-expect-error - intentionally passing invalid teardown for testing
                 await expect(async () => Promise.resolve()).toResolveWithinQuantile(10, {iterations: 5, quantile: 95, teardown: 42});
             }).rejects.toThrowError("jest-performance-matchers: teardown must be a function if provided, received number");
+        });
+
+        test("should throw a validation error when allowedErrorRate is negative", async () => {
+            // GIVEN a negative allowedErrorRate
+            const givenAllowedErrorRate = -0.1;
+
+            // WHEN asserting with the invalid rate
+            // THEN a descriptive error is thrown
+            await expect(async () => {
+                await expect(async () => Promise.resolve()).toResolveWithinQuantile(10, {iterations: 5, quantile: 95, allowedErrorRate: givenAllowedErrorRate});
+            }).rejects.toThrowError(`jest-performance-matchers: allowedErrorRate must be a number between 0 and 1, received ${givenAllowedErrorRate}`);
+        });
+
+        test("should throw a validation error when allowedErrorRate exceeds 1", async () => {
+            // GIVEN an allowedErrorRate above the maximum
+            const givenAllowedErrorRate = 1.1;
+
+            // WHEN asserting with the invalid rate
+            // THEN a descriptive error is thrown
+            await expect(async () => {
+                await expect(async () => Promise.resolve()).toResolveWithinQuantile(10, {iterations: 5, quantile: 95, allowedErrorRate: givenAllowedErrorRate});
+            }).rejects.toThrowError(`jest-performance-matchers: allowedErrorRate must be a number between 0 and 1, received ${givenAllowedErrorRate}`);
+        });
+
+        test("should throw a validation error when allowedErrorRate is NaN", async () => {
+            // GIVEN NaN as allowedErrorRate
+            // WHEN asserting with the invalid rate
+            // THEN a descriptive error is thrown
+            await expect(async () => {
+                await expect(async () => Promise.resolve()).toResolveWithinQuantile(10, {iterations: 5, quantile: 95, allowedErrorRate: NaN});
+            }).rejects.toThrowError("jest-performance-matchers: allowedErrorRate must be a number between 0 and 1, received NaN");
+        });
+
+        test("should throw a validation error when allowedErrorRate is Infinity", async () => {
+            // GIVEN Infinity as allowedErrorRate
+            // WHEN asserting with the invalid rate
+            // THEN a descriptive error is thrown
+            await expect(async () => {
+                await expect(async () => Promise.resolve()).toResolveWithinQuantile(10, {iterations: 5, quantile: 95, allowedErrorRate: Infinity});
+            }).rejects.toThrowError("jest-performance-matchers: allowedErrorRate must be a number between 0 and 1, received Infinity");
         });
     });
 });

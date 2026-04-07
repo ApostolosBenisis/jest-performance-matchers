@@ -36,7 +36,7 @@ function validateSetupTeardown(options?: { setup?: unknown, teardown?: unknown, 
     }
 }
 
-function validateQuantileOptions(options: { iterations: number, quantile: number, warmup?: number, outliers?: 'remove' | 'keep', setup?: unknown, teardown?: unknown, setupEach?: unknown, teardownEach?: unknown }): void {
+function validateQuantileOptions(options: { iterations: number, quantile: number, warmup?: number, outliers?: 'remove' | 'keep', setup?: unknown, teardown?: unknown, setupEach?: unknown, teardownEach?: unknown, allowedErrorRate?: number }): void {
     if (!options || typeof options !== 'object') {
         throw new Error('jest-performance-matchers: options must be an object with iterations and quantile');
     }
@@ -51,6 +51,11 @@ function validateQuantileOptions(options: { iterations: number, quantile: number
     }
     if (options.outliers !== undefined && options.outliers !== 'remove' && options.outliers !== 'keep') {
         throw new Error(`jest-performance-matchers: outliers must be 'remove' or 'keep', received '${options.outliers}'`);
+    }
+    if (options.allowedErrorRate !== undefined) {
+        if (typeof options.allowedErrorRate !== 'number' || !Number.isFinite(options.allowedErrorRate) || options.allowedErrorRate < 0 || options.allowedErrorRate > 1) {
+            throw new Error(`jest-performance-matchers: allowedErrorRate must be a number between 0 and 1, received ${options.allowedErrorRate}`);
+        }
     }
     validateSetupTeardown(options);
 }
@@ -100,6 +105,7 @@ function toCompleteWithinQuantile(callback: (...args: any[]) => unknown, expecte
     teardown?: (suiteState: unknown) => void,
     setupEach?: (suiteState: unknown) => unknown,
     teardownEach?: (suiteState: unknown, iterState: unknown) => void,
+    allowedErrorRate?: number,
 }) {
     validateCallback(callback);
     validateDuration(expectedDurationInMilliseconds);
@@ -112,6 +118,8 @@ function toCompleteWithinQuantile(callback: (...args: any[]) => unknown, expecte
 
     const suiteState = setup ? setup() : undefined;
 
+    const allowedErrorRate = options.allowedErrorRate ?? 0;
+
     try {
         for (let i = 0; i < warmup; i++) {
             const iterState = setupEach ? setupEach(suiteState) : undefined;
@@ -123,6 +131,7 @@ function toCompleteWithinQuantile(callback: (...args: any[]) => unknown, expecte
         }
 
         const durations: number[] = [];
+        let errorCount = 0;
         for (let i = 0; i < count; i++) {
             const iterState = setupEach ? setupEach(suiteState) : undefined;
             try {
@@ -130,15 +139,16 @@ function toCompleteWithinQuantile(callback: (...args: any[]) => unknown, expecte
                 callback(suiteState, iterState);
                 const t1 = nowInMillis();
                 durations.push(t1 - t0);
+            } catch (e) {
+                if (allowedErrorRate === 0) throw e;
+                errorCount++;
             } finally {
                 if (teardownEach) teardownEach(suiteState, iterState);
             }
         }
 
-        const effectiveDurations = options.outliers === 'remove' ? removeOutliers(durations) : durations;
-        const quantileValue = calcQuantile(quantile, effectiveDurations);
         const setupTeardownActive = !!(setup || teardown || setupEach || teardownEach);
-        return assertDurationQuantile(count, quantile, quantileValue, effectiveDurations, expectedDurationInMilliseconds, setupTeardownActive);
+        return processQuantileResults(durations, count, quantile, errorCount, allowedErrorRate, expectedDurationInMilliseconds, setupTeardownActive, options.outliers === 'remove');
     } finally {
         if (teardown) teardown(suiteState);
     }
@@ -188,6 +198,7 @@ async function toResolveWithinQuantile(promise: (...args: any[]) => Promise<unkn
     teardown?: (suiteState: unknown) => void | Promise<void>,
     setupEach?: (suiteState: unknown) => unknown | Promise<unknown>,
     teardownEach?: (suiteState: unknown, iterState: unknown) => void | Promise<void>,
+    allowedErrorRate?: number,
 }) {
     validateCallback(promise);
     validateDuration(expectedDurationInMilliseconds);
@@ -199,6 +210,7 @@ async function toResolveWithinQuantile(promise: (...args: any[]) => Promise<unkn
     const { setup, teardown, setupEach, teardownEach } = options;
 
     const suiteState = setup ? await setup() : undefined;
+    const allowedErrorRate = options.allowedErrorRate ?? 0;
 
     try {
         for (let i = 0; i < warmup; i++) {
@@ -211,6 +223,7 @@ async function toResolveWithinQuantile(promise: (...args: any[]) => Promise<unkn
         }
 
         const durations: number[] = [];
+        let errorCount = 0;
         for (let i = 0; i < count; i++) {
             const iterState = setupEach ? await setupEach(suiteState) : undefined;
             try {
@@ -218,25 +231,63 @@ async function toResolveWithinQuantile(promise: (...args: any[]) => Promise<unkn
                 await promise(suiteState, iterState);
                 const t1 = nowInMillis();
                 durations.push(t1 - t0);
+            } catch (e) {
+                if (allowedErrorRate === 0) throw e;
+                errorCount++;
             } finally {
                 if (teardownEach) await teardownEach(suiteState, iterState);
             }
         }
 
-        const effectiveDurations = options.outliers === 'remove' ? removeOutliers(durations) : durations;
-        const quantileValue = calcQuantile(quantile, effectiveDurations);
         const setupTeardownActive = !!(setup || teardown || setupEach || teardownEach);
-        return assertDurationQuantile(count, quantile, quantileValue, effectiveDurations, expectedDurationInMilliseconds, setupTeardownActive);
+        return processQuantileResults(durations, count, quantile, errorCount, allowedErrorRate, expectedDurationInMilliseconds, setupTeardownActive, options.outliers === 'remove');
     } finally {
         if (teardown) await teardown(suiteState);
     }
+}
+
+function processQuantileResults(
+    durations: number[], count: number, quantile: number, errorCount: number, allowedErrorRate: number,
+    expectedDurationInMilliseconds: number, setupTeardownActive: boolean, removeOutliersEnabled: boolean
+): { message: () => string; pass: boolean } {
+    if (durations.length === 0) {
+        return {
+            pass: false,
+            message: () => `all ${count} iterations failed (100% error rate, allowed ${(allowedErrorRate * 100).toFixed(1)}%)`,
+        };
+    }
+
+    const actualErrorRate = errorCount / count;
+    if (actualErrorRate > allowedErrorRate) {
+        return {
+            pass: false,
+            message: () => `error rate ${errorCount}/${count} (${(actualErrorRate * 100).toFixed(1)}%) exceeds allowed ${(allowedErrorRate * 100).toFixed(1)}%`,
+        };
+    }
+
+    const effectiveDurations = removeOutliersEnabled ? removeOutliers(durations) : durations;
+    if (effectiveDurations.length === 0) {
+        return {
+            pass: false,
+            message: () => `all ${durations.length} successful iterations were removed as outliers after error exclusion`,
+        };
+    }
+    const quantileValue = calcQuantile(quantile, effectiveDurations);
+    const errorInfo: ErrorInfo | undefined = errorCount > 0 ? { errorCount, totalIterations: count, allowedRate: allowedErrorRate } : undefined;
+    return assertDurationQuantile(count, quantile, quantileValue, effectiveDurations, expectedDurationInMilliseconds, setupTeardownActive, errorInfo);
 }
 
 function formatStatValue(value: number | null): string {
     return value === null ? 'N/A' : value.toFixed(2);
 }
 
-function formatStatsBlock(stats: Stats, durations: number[], expectedDuration?: number, setupTeardownActive?: boolean): string {
+interface ErrorInfo {
+    errorCount: number;
+    totalIterations: number;
+    allowedRate: number;
+}
+
+function formatStatsBlock(stats: Stats, durations: number[], expectedDuration?: number, setupTeardownActive?: boolean, errorInfo?: ErrorInfo): string {
     const rmeTag = classifyRME(stats.relativeMarginOfError);
     const cvTag = classifyCV(stats.coefficientOfVariation);
 
@@ -272,8 +323,14 @@ function formatStatsBlock(stats: Stats, durations: number[], expectedDuration?: 
         `Distribution: min=${formatStatValue(stats.min)}ms | P25=${formatStatValue(p25)}ms | P50=${formatStatValue(p50)}ms | P75=${formatStatValue(p75)}ms | P90=${formatStatValue(p90)}ms | max=${formatStatValue(stats.max)}ms`,
         `Shape: ${shapeDiag.label} (skewness=${skewnessText}) | ${shapeDiag.sparkline}`,
         `Sample adequacy: ${formatTag(classifySampleAdequacy(stats.n))} (n=${stats.n})`,
-        `Interpretation: ${generateInterpretation(stats, expectedDuration)}`,
+        `Interpretation: ${generateInterpretation(stats, expectedDuration, errorInfo)}`,
     ];
+
+    if (errorInfo !== undefined && errorInfo.errorCount > 0) {
+        const actualRate = (errorInfo.errorCount / errorInfo.totalIterations * 100).toFixed(1);
+        const allowedRate = (errorInfo.allowedRate * 100).toFixed(1);
+        lines.push(`Error rate: ${errorInfo.errorCount}/${errorInfo.totalIterations} (${actualRate}%) [within ${allowedRate}% tolerance]`);
+    }
 
     if (stats.warnings.length > 0) {
         lines.push('Warnings:');
@@ -285,9 +342,9 @@ function formatStatsBlock(stats: Stats, durations: number[], expectedDuration?: 
     return lines.join('\n');
 }
 
-function assertDurationQuantile(iterations: number, quantile: number,  quantileValue: number, durations: number[], expectedDurationInMilliseconds: number, setupTeardownActive?: boolean) {
+function assertDurationQuantile(iterations: number, quantile: number,  quantileValue: number, durations: number[], expectedDurationInMilliseconds: number, setupTeardownActive?: boolean, errorInfo?: ErrorInfo) {
     const stats = calcStats(durations);
-    const statsBlock = formatStatsBlock(stats, durations, expectedDurationInMilliseconds, setupTeardownActive);
+    const statsBlock = formatStatsBlock(stats, durations, expectedDurationInMilliseconds, setupTeardownActive, errorInfo);
 
     if (quantileValue <= expectedDurationInMilliseconds) {
         return {
@@ -348,6 +405,7 @@ declare global {
                 teardown?: (suiteState: T) => void,
                 setupEach?: (suiteState: T) => U,
                 teardownEach?: (suiteState: T, iterState: U) => void,
+                allowedErrorRate?: number,
             }): R;
 
             toResolveWithin<T = void>(expectedDurationInMilliseconds: number, options?: {
@@ -364,6 +422,7 @@ declare global {
                 teardown?: (suiteState: T) => void | Promise<void>,
                 setupEach?: (suiteState: T) => U | Promise<U>,
                 teardownEach?: (suiteState: T, iterState: U) => void | Promise<void>,
+                allowedErrorRate?: number,
             }): Promise<R>;
         }
     }

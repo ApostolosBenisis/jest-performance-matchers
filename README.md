@@ -164,6 +164,11 @@ expect(() => {
 expect(() => {
     sortArray(data);
 }).toCompleteWithinQuantile(10, { iterations: 100, quantile: 95, warmup: 5, outliers: 'remove' });
+
+// With error tolerance — tolerate up to 5% of iterations throwing
+expect(() => {
+    processUnstableInput(data);
+}).toCompleteWithinQuantile(10, { iterations: 200, quantile: 95, allowedErrorRate: 0.05 });
 ```
 
 ### `.toResolveWithin(ms, options?)`
@@ -205,6 +210,11 @@ await expect(async () => {
 await expect(async () => {
     await fetchData();
 }).toResolveWithinQuantile(100, { iterations: 50, quantile: 90, outliers: 'remove' });
+
+// With error tolerance — tolerate up to 2% of iterations failing (e.g., transient network errors)
+await expect(async () => {
+    await handleRequest(mockReq);
+}).toResolveWithinQuantile(100, { iterations: 200, quantile: 95, allowedErrorRate: 0.02 });
 ```
 
 ### Quantile options reference
@@ -219,6 +229,7 @@ await expect(async () => {
 | `teardown` | `(suiteState: T) => void` | No | Called **once** after all iterations. Receives the `setup` return value. Errors are fatal |
 | `setupEach` | `(suiteState: T) => U` | No | Called before **each** iteration (including warmup), not timed. Receives the `setup` return value; its own return value is passed to the callback and `teardownEach`. Errors are fatal |
 | `teardownEach` | `(suiteState: T, iterState: U) => void` | No | Called after **each** iteration (including warmup), not timed. Receives both `setup` and `setupEach` return values. Errors are fatal |
+| `allowedErrorRate` | `number` | No | Fraction of iterations allowed to throw (0–1, default: `0`). Failed iterations are excluded from timing stats. If the actual error rate exceeds this threshold, the matcher fails. Setup/teardown errors are always fatal |
 
 > **Note:** For async matchers (`toResolveWithinQuantile`), `setup` and `setupEach` may return a `Promise` (the resolved value is forwarded), and `teardown`/`teardownEach` may return a `Promise`.
 
