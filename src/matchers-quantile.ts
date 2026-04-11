@@ -61,7 +61,7 @@ export function toCompleteWithinQuantile(callback: (...args: any[]) => unknown, 
     }
 
     const setupTeardownActive = !!(setup || teardown || setupEach || teardownEach);
-    return processQuantileResults(durations, count, quantile, errorCount, allowedErrorRate, expectedDurationInMilliseconds, setupTeardownActive, options.outliers === 'remove');
+    return processQuantileResults({durations, count, quantile, errorCount, allowedErrorRate, expectedDurationInMilliseconds, setupTeardownActive, removeOutliersEnabled: options.outliers === 'remove'});
   } finally {
     if (teardown) teardown(suiteState);
   }
@@ -125,7 +125,7 @@ export async function toResolveWithinQuantile(promise: (...args: any[]) => Promi
     }
 
     const setupTeardownActive = !!(setup || teardown || setupEach || teardownEach);
-    return processQuantileResults(durations, count, quantile, errorCount, allowedErrorRate, expectedDurationInMilliseconds, setupTeardownActive, options.outliers === 'remove');
+    return processQuantileResults({durations, count, quantile, errorCount, allowedErrorRate, expectedDurationInMilliseconds, setupTeardownActive, removeOutliersEnabled: options.outliers === 'remove'});
   } finally {
     if (teardown) await teardown(suiteState);
   }

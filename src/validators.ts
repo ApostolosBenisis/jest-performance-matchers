@@ -63,3 +63,39 @@ export function validateQuantileOptions(options: {
   }
   validateSetupTeardown(options);
 }
+
+export function validateComparativeOptions(options: {
+  iterations: number,
+  warmup?: number,
+  confidence?: number,
+  outliers?: 'remove' | 'keep',
+  setup?: unknown,
+  teardown?: unknown,
+  setupEach?: unknown,
+  teardownEach?: unknown,
+  allowedErrorRate?: number,
+}): void {
+  if (!options || typeof options !== 'object') {
+    throw new Error('jest-performance-matchers: options must be an object with iterations');
+  }
+  if (!Number.isInteger(options.iterations) || options.iterations < 2) {
+    throw new Error(`jest-performance-matchers: iterations must be an integer >= 2 for comparative matchers (Welch's t-test requires n >= 2 per function), received ${options.iterations}`);
+  }
+  if (options.warmup !== undefined && (!Number.isInteger(options.warmup) || options.warmup < 0)) {
+    throw new Error(`jest-performance-matchers: warmup must be a non-negative integer, received ${options.warmup}`);
+  }
+  if (options.confidence !== undefined) {
+    if (typeof options.confidence !== 'number' || !Number.isFinite(options.confidence) || options.confidence <= 0 || options.confidence >= 1) {
+      throw new Error(`jest-performance-matchers: confidence must be a number between 0 (exclusive) and 1 (exclusive), received ${options.confidence}`);
+    }
+  }
+  if (options.outliers !== undefined && options.outliers !== 'remove' && options.outliers !== 'keep') {
+    throw new Error(`jest-performance-matchers: outliers must be 'remove' or 'keep', received '${options.outliers}'`);
+  }
+  if (options.allowedErrorRate !== undefined) {
+    if (typeof options.allowedErrorRate !== 'number' || !Number.isFinite(options.allowedErrorRate) || options.allowedErrorRate < 0 || options.allowedErrorRate > 1) {
+      throw new Error(`jest-performance-matchers: allowedErrorRate must be a number between 0 and 1, received ${options.allowedErrorRate}`);
+    }
+  }
+  validateSetupTeardown(options);
+}

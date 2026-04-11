@@ -1,4 +1,4 @@
-import {Stats} from "./metrics";
+import {Stats, WelchTTestResult} from "./metrics";
 
 export type TagLabel = 'GOOD' | 'FAIR' | 'POOR';
 
@@ -105,7 +105,7 @@ export function classifySampleAdequacy(n: number): Tag {
  * when the quantile assertion passes.
  */
 function interpretPoorCV(rmeTag: Tag, cvTag: Tag, madTag: Tag | null, context: 'approximate' | 'precise'): string {
-  const madSuffix = madTag !== null ? `, MAD: ${formatTag(madTag)}` : '';
+  const madSuffix = madTag === null ? '' : `, MAD: ${formatTag(madTag)}`;
   if (madTag !== null && madTag.label !== 'POOR') {
     const action = context === 'approximate'
       ? 'enable outlier removal and increase iterations'
@@ -122,7 +122,7 @@ function classifyReliability(rme: Tag, cv: Tag, mad: Tag | null, sample: Tag): s
   const remedy = 'try increasing iterations, adding warmup, or enabling outlier removal';
 
   if (rme.label === 'POOR') {
-    const sampleNote = sample.label !== 'GOOD' ? ` with ${sample.label} sample size` : '';
+    const sampleNote = sample.label === 'GOOD' ? '' : ` with ${sample.label} sample size`;
     return `mean is not reliable (RME: ${formatTag(rme)}, CV: ${formatTag(cv)})${sampleNote}. ${remedy}`;
   }
   if (rme.label === 'FAIR' && cv.label === 'POOR') {
@@ -169,8 +169,11 @@ export function generateInterpretation(stats: Stats, expectedDuration?: number, 
   }
 
   // cv is guaranteed non-null when rme is non-null (both derive from mean !== 0)
-  const cvTag = cv as Tag;
-  let message = classifyReliability(rme, cvTag, mad, sample);
+  /* istanbul ignore next -- defensive guard: cv is always non-null when rme is non-null */
+  if (cv === null) {
+    return 'relative error cannot be computed (mean ≈ 0) — RME and CV are unavailable when the mean is zero';
+  }
+  let message = classifyReliability(rme, cv, mad, sample);
 
   if (expectedDuration !== undefined && stats.confidenceInterval !== null) {
     message = appendCICheck(message, stats.confidenceInterval, expectedDuration);
@@ -181,4 +184,74 @@ export function generateInterpretation(stats: Stats, expectedDuration?: number, 
   }
 
   return message;
+}
+
+/**
+ * Generate a human-readable interpretation of a comparative benchmark (A vs B).
+ *
+ * Considers:
+ * 1. Data reliability (RME of both datasets)
+ * 2. Statistical significance (p-value vs alpha)
+ * 3. Practical significance (percentage difference)
+ * 4. CI overlap between the two functions
+ */
+export function generateComparisonInterpretation(
+  statsA: Stats, statsB: Stats, tTest: WelchTTestResult, confidence: number
+): string {
+  const rmeA = classifyRME(statsA.relativeMarginOfError);
+  const rmeB = classifyRME(statsB.relativeMarginOfError);
+
+  const reliabilityCheck = checkComparisonReliability(rmeA, rmeB);
+  if (reliabilityCheck !== null) return reliabilityCheck;
+
+  const alpha = 1 - confidence;
+  const meanB = statsB.mean as number; // guaranteed non-null: callers ensure n >= 2
+  const absDiff = Math.abs(tTest.meanDifference);
+  const pctDiff = meanB === 0 ? 0 : (absDiff / Math.abs(meanB)) * 100;
+
+  if (tTest.pValue < alpha) {
+    return formatSignificantResult(tTest, absDiff, pctDiff, alpha);
+  }
+  return formatNotSignificantResult(tTest, absDiff, pctDiff, alpha);
+}
+
+function checkComparisonReliability(rmeA: Tag | null, rmeB: Tag | null): string | null {
+  const unreliableA = rmeA !== null && rmeA.label === 'POOR';
+  const unreliableB = rmeB !== null && rmeB.label === 'POOR';
+  if (unreliableA || unreliableB) {
+    let which: string;
+    if (unreliableA && unreliableB) which = 'both functions have';
+    else if (unreliableA) which = 'Function A has';
+    else which = 'Function B has';
+    return `comparison is unreliable — ${which} POOR RME (wide confidence intervals). Increase iterations or add warmup before drawing conclusions`;
+  }
+  if (rmeA === null || rmeB === null) {
+    return 'comparison reliability cannot be assessed — one or both functions have near-zero mean timing. Results may not be meaningful';
+  }
+  return null;
+}
+
+function formatSignificantResult(tTest: WelchTTestResult, absDiff: number, pctDiff: number, alpha: number): string {
+  let practical = '';
+  if (pctDiff < 1) {
+    practical = '. However, the difference is less than 1% — statistically significant but may be practically negligible';
+  } else if (pctDiff < 5) {
+    practical = '. The difference is modest (< 5%) — consider whether this is practically meaningful for your use case';
+  }
+  return `Function A is statistically significantly faster than Function B (p=${formatPValue(tTest.pValue)} < α=${alpha.toFixed(2)}), with a mean difference of ${absDiff.toFixed(2)}ms (${pctDiff.toFixed(1)}%)${practical}`;
+}
+
+function formatNotSignificantResult(tTest: WelchTTestResult, absDiff: number, pctDiff: number, alpha: number): string {
+  if (tTest.meanDifference < 0) {
+    return `no statistically significant evidence that Function A is faster than Function B (p=${formatPValue(tTest.pValue)} >= α=${alpha.toFixed(2)}). Function A trends faster by ${absDiff.toFixed(2)}ms (${pctDiff.toFixed(1)}%) but the difference could be due to chance — increase iterations for more statistical power`;
+  }
+  if (tTest.meanDifference === 0) {
+    return `no statistically significant difference — both functions have identical mean timing (p=${formatPValue(tTest.pValue)} >= α=${alpha.toFixed(2)})`;
+  }
+  return `Function A appears to be slower than Function B by ${absDiff.toFixed(2)}ms (${pctDiff.toFixed(1)}%), not faster (p=${formatPValue(tTest.pValue)} >= α=${alpha.toFixed(2)})`;
+}
+
+export function formatPValue(p: number): string {
+  if (p < 0.0001) return '<0.0001';
+  return p.toFixed(4);
 }

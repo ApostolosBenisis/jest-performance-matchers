@@ -13,13 +13,17 @@
    Assert · Measure · Prove
 ```
 
-Jest matchers for **statistically reliable** performance testing in Node.js. Measure code execution time over multiple iterations, assert on quantiles, and catch performance regressions in CI — all with zero dependencies.
+Jest matchers for **statistically reliable** performance testing in Node.js. Measure code execution time over multiple iterations, assert on quantiles, **compare two functions via Welch's t-test**, and catch performance regressions in CI — all with zero dependencies.
 
 ```ts
 // Ensure your API handler stays fast — P95 under 50ms across 100 runs
 await expect(async () => {
     await handleRequest(mockReq);
 }).toResolveWithinQuantile(50, { iterations: 100, quantile: 95, warmup: 5 });
+
+// Prove your optimized sort is statistically faster than the baseline
+expect(() => quicksort(data))
+    .toBeFasterThan(() => bubblesort(data), { iterations: 100, warmup: 5 });
 ```
 
 ## What is this for?
@@ -29,6 +33,7 @@ Use `jest-performance-matchers` when you need to:
 - **Set performance budgets in CI** — fail the build when critical paths exceed time limits
 - **Detect performance regressions** — catch slowdowns before they reach production
 - **Validate with statistical confidence** — assert on percentiles (P90, P95, P99), not single flaky runs
+- **Compare implementations** — prove one algorithm is statistically faster than another using Welch's t-test
 
 If you already have Jest tests, adding performance assertions takes one import and one line of code.
 
@@ -40,6 +45,7 @@ If you already have Jest tests, adding performance assertions takes one import a
 | **Flakiness** | Single run = noisy result | Multiple iterations + quantiles = stable |
 | **Outliers** | One GC pause fails the test | IQR-based outlier removal |
 | **Diagnostics** | You get a number | Mean, median, CI, percentiles, shape, sparklines, and actionable guidance |
+| **Comparison** | Run both, compare means, hope for the best | Welch's t-test with p-values, confidence intervals, and effect size |
 | **Warmup** | DIY or forget about it | Built-in warmup iterations |
 | **Statistics** | None built-in | Built-in — mean, CI, quantiles, outlier detection |
 | **Dependencies** | Grows with each need — more code to trust | Zero — nothing to audit, nothing to break |
@@ -51,7 +57,8 @@ If you already have Jest tests, adding performance assertions takes one import a
 - **High-resolution timing** — `process.hrtime()` for sub-millisecond accuracy
 - **Statistical rigor** — 95% confidence intervals (Student's t / z), IQR outlier detection, skewness analysis, distribution shape classification, quality tags, sample adequacy labels, and interpretive guidance on failure
 - **Warmup iterations** — exclude JIT compilation and cache warming from measurements
-- **Exported utilities** — use `calcStats()`, `calcQuantile()`, and `removeOutliers()` directly in your own code
+- **Comparative benchmarking** — Welch's t-test to statistically prove one function is faster than another, with one-sided hypothesis testing and configurable confidence levels
+- **Exported utilities** — use `calcStats()`, `calcQuantile()`, `removeOutliers()`, and `welchTTest()` directly in your own code
 
 ## Prerequisites
 
@@ -115,6 +122,26 @@ expect(() => {
     transformDataset(records);
 }).toCompleteWithinQuantile(200, { iterations: 30, quantile: 95 });
 ```
+
+### Algorithm comparison
+
+```ts
+expect(() => optimizedParser(input))
+    .toBeFasterThan(() => legacyParser(input), {
+        iterations: 100, warmup: 5, confidence: 0.95
+    });
+```
+
+### Database query optimization
+
+```ts
+await expect(async () => await queryWithIndex(db, id))
+    .toResolveFasterThan(async () => await queryFullScan(db, id), {
+        iterations: 50, warmup: 3, outliers: 'remove'
+    });
+```
+
+> **Want runnable examples?** See the [`examples/`](./examples) directory for complete, working test files covering all matchers and exported utilities.
 
 ## Matchers
 
@@ -217,6 +244,94 @@ await expect(async () => {
 }).toResolveWithinQuantile(100, { iterations: 200, quantile: 95, allowedErrorRate: 0.02 });
 ```
 
+### `.toBeFasterThan(comparisonFn, options)`
+
+Assert that a synchronous function is statistically faster than another using Welch's t-test. Both functions are executed for N iterations (interleaved), and the results are compared for statistical significance:
+
+```ts
+// Basic — prove quicksort is faster than bubblesort across 100 runs
+expect(() => quicksort(data))
+    .toBeFasterThan(() => bubblesort(data), { iterations: 100 });
+
+// With warmup — exclude JIT compilation overhead
+expect(() => quicksort(data))
+    .toBeFasterThan(() => bubblesort(data), { iterations: 100, warmup: 5 });
+
+// With outlier removal — filter GC pauses before comparing
+expect(() => quicksort(data))
+    .toBeFasterThan(() => bubblesort(data), { iterations: 100, outliers: 'remove' });
+
+// With custom confidence — require 99% confidence instead of 95%
+expect(() => quicksort(data))
+    .toBeFasterThan(() => bubblesort(data), { iterations: 100, confidence: 0.99 });
+
+// Negation — assert Function A is NOT faster than Function B
+expect(() => legacyParser(input))
+    .not.toBeFasterThan(() => optimizedParser(input), { iterations: 100 });
+
+// With error tolerance — tolerate up to 5% of iterations failing
+expect(() => processUnstable(data))
+    .toBeFasterThan(() => processStable(data), { iterations: 200, allowedErrorRate: 0.05 });
+```
+
+### `.toResolveFasterThan(comparisonFn, options)`
+
+Assert that an asynchronous function is statistically faster than another using Welch's t-test. Same API as `.toBeFasterThan`, but for promise-returning functions:
+
+```ts
+// Basic
+await expect(async () => await queryWithIndex(db, id))
+    .toResolveFasterThan(async () => await queryFullScan(db, id), { iterations: 50 });
+
+// With warmup and outlier removal
+await expect(async () => await cachedFetch(url))
+    .toResolveFasterThan(async () => await uncachedFetch(url), {
+        iterations: 50, warmup: 3, outliers: 'remove'
+    });
+
+// Negation
+await expect(async () => await slowQuery(db))
+    .not.toResolveFasterThan(async () => await fastQuery(db), { iterations: 50 });
+```
+
+### Comparative options reference
+
+| Option | Type | Required | Description |
+|---|---|---|---|
+| `iterations` | `number` | Yes | Number of measured iterations per function (integer >= 2) |
+| `warmup` | `number` | No | Warmup iterations to run before measurement (default: `0`) |
+| `confidence` | `number` | No | Significance level for the t-test, between 0 and 1 exclusive (default: `0.95`). Higher values require stronger evidence |
+| `outliers` | `'remove' \| 'keep'` | No | Whether to remove IQR-based outliers per function before comparison (default: `'keep'`) |
+| `setup` | `() => T` | No | Called **once** before all iterations. Return value is shared by both functions via `setupEach`, callbacks, and `teardown`. Errors are fatal |
+| `teardown` | `(suiteState: T) => void` | No | Called **once** after all iterations (in a `finally` block). Receives the `setup` return value. Errors are fatal |
+| `setupEach` | `(suiteState: T) => U` | No | Called before **each function in each iteration** (including warmup), not timed. Called separately for A and B so each gets fresh state. Its return value is passed to the callback and `teardownEach`. Errors are fatal |
+| `teardownEach` | `(suiteState: T, iterState: U) => void` | No | Called after **each function in each iteration** (including warmup), not timed. Receives both `setup` and `setupEach` return values. Errors are fatal |
+| `allowedErrorRate` | `number` | No | Fraction of iterations allowed to throw per function (0–1, default: `0`). Error rates are checked independently for each function. Setup/teardown errors are always fatal |
+
+> **Execution model:** Iterations are interleaved — each iteration runs A then B. `setupEach` is called separately for each function so mutations in one function's state don't affect the other. Minimum 2 iterations required (Welch's t-test needs n >= 2 per function).
+
+> **Note:** For async matchers (`toResolveFasterThan`), `setup` and `setupEach` may return a `Promise`, and `teardown`/`teardownEach` may return a `Promise`.
+
+#### Comparative setup/teardown example
+
+```ts
+// setup runs once (shared), setupEach runs per function per iteration (fresh state each time)
+expect((conn: DbConnection, data: Row[]) => {
+    processWithNewAlgorithm(conn, data);
+}).toBeFasterThan((conn: DbConnection, data: Row[]) => {
+    processWithOldAlgorithm(conn, data);
+}, {
+    iterations: 50,
+    warmup: 5,
+    setup: (): DbConnection => createDbConnection(),
+    setupEach: (conn: DbConnection): Row[] => conn.query('SELECT * FROM test_data'),
+    teardownEach: (conn: DbConnection, data: Row[]) => { /* per-iteration cleanup */ },
+    teardown: (conn: DbConnection) => conn.close(),
+});
+```
+
+Setup, teardown, setupEach, and teardownEach time is excluded from measurements. If any throws, the test fails immediately — these are test infrastructure errors, not tolerated failures.
+
 ### Quantile options reference
 
 | Option | Type | Required | Description |
@@ -270,6 +385,8 @@ Setup, teardown, setupEach, and teardownEach time is excluded from measurements.
 
 ## Failure diagnostics
 
+### Quantile matcher diagnostics
+
 When a quantile matcher fails, it outputs rich diagnostics to help you understand your performance profile:
 
 ```
@@ -303,6 +420,54 @@ The diagnostics include:
 - **Sample adequacy** — classifies sample size as `POOR` (< 10), `FAIR` (10-30), or `GOOD` (> 30)
 - **Interpretation** — single-sentence summary of result reliability based on the RME × CV × MAD matrix
 - **Warnings** — contextual alerts (e.g., small sample size, empty dataset)
+
+### Comparative matcher diagnostics
+
+When a comparative matcher (`toBeFasterThan` / `toResolveFasterThan`) fails, it outputs diagnostics for both functions and a statistical comparison:
+
+```
+expected Function A to be faster than Function B,
+but no statistically significant difference was found (p=0.1410 >= α=0.05)
+
+--- Function A ---
+Statistics (n=100): mean=12.45ms, median=11.80ms, stddev=3.21ms
+Confidence Interval (CI): 95% [11.81, 13.09]ms
+Relative Margin of Error (RME): 5.14% [GOOD <10%]
+Coefficient of Variation (CV): 0.26 [FAIR 0.1-0.3]
+Median Absolute Deviation (MAD): 1.50ms [FAIR 0.1-0.3]
+Distribution: min=6.20ms | P25=10.30ms | P50=11.80ms | P75=14.10ms | P90=16.80ms | max=22.40ms
+Shape: right-skewed (skewness=0.84) | ▂▅█▇▅▃▂▁▁
+...
+
+--- Function B ---
+Statistics (n=100): mean=13.02ms, median=12.50ms, stddev=4.10ms
+...
+
+--- Comparison ---
+Mean difference: -0.57ms (Function A is faster by 0.57ms, 4.4%)
+Welch's t-test: t=-1.08, df=188.3, p=0.1410 (one-sided)
+Confidence interval for difference: 95% [-1.61, 0.47]ms
+Result: no statistically significant evidence that Function A is faster
+  than Function B (p=0.1410 >= α=0.05). Function A trends faster by
+  0.57ms (4.4%) but the difference could be due to chance — increase
+  iterations for more statistical power
+```
+
+The comparative diagnostics include:
+- **Per-function stats** — full diagnostics for each function (same format as quantile matchers: mean, CI, RME, CV, MAD, distribution, shape, interpretation)
+- **Mean difference** — raw difference in milliseconds and as a percentage
+- **Welch's t-test** — t-statistic, degrees of freedom (Welch-Satterthwaite), and one-sided p-value
+- **Confidence interval for the difference** — if this interval excludes zero, the functions have meaningfully different performance
+- **Result interpretation** — considers data reliability (POOR RME warnings), statistical significance (p-value vs α), and practical significance (percentage difference)
+
+### Comparative testing tips
+
+- **Use >= 30 iterations** per function for reliable t-test results
+- **Add warmup** to stabilize both functions before comparison
+- **Enable outlier removal** (`outliers: 'remove'`) when comparing I/O-bound operations
+- **Use `setupEach`** to provide fresh data for each iteration — prevents mutation in one function from affecting the other
+- **Check practical significance** — a significant p-value (< α) means Function A is statistically faster, but check the percentage difference to decide if it matters in practice
+- **If the CI for the difference includes zero** — the functions may have equivalent performance; increase iterations for more statistical power
 
 ### How to use each metric
 
@@ -440,6 +605,35 @@ console.log(shape.sparkline); // "▁▃▇█▅▃▂▁▁▁" (ASCII histogr
 Shape labels: `"symmetric"`, `"left-skewed"`, `"right-skewed"`, `"bimodal"`, `"constant"`, `"insufficient data"`.
 
 > **Note:** Shape diagnostics are most reliable with n > 100. Smaller samples produce noisier sparklines and less stable shape labels.
+
+### `welchTTest(statsA: Stats, statsB: Stats, confidence: number): WelchTTestResult`
+
+Perform Welch's t-test comparing two independent samples. Tests H1: meanA < meanB (Function A is faster) using a one-sided test:
+
+```ts
+import { welchTTest, calcStats } from 'jest-performance-matchers/metrics';
+
+const statsA = calcStats([5.1, 4.9, 5.0, 5.2, 4.8]);
+const statsB = calcStats([15.1, 14.9, 15.0, 15.2, 14.8]);
+const result = welchTTest(statsA, statsB, 0.95);
+
+console.log(result.t);               // -63.25 (negative = Function A is faster)
+console.log(result.pValue);          // ~0 (highly significant)
+console.log(result.meanDifference);  // -10 (Function A is 10ms faster)
+console.log(result.df);              // ~8 (Welch-Satterthwaite degrees of freedom)
+console.log(result.confidenceInterval); // [-10.35, -9.65] (CI for the difference)
+```
+
+### `WelchTTestResult` interface
+
+| Field | Type | Description |
+|---|---|---|
+| `t` | `number` | t-statistic. Negative when Function A is faster |
+| `df` | `number` | Welch-Satterthwaite degrees of freedom |
+| `pValue` | `number` | One-sided p-value. Small when Function A is genuinely faster |
+| `meanDifference` | `number` | meanA - meanB. Negative when Function A is faster |
+| `standardError` | `number` | Standard error of the difference |
+| `confidenceInterval` | `[number, number]` | CI for the mean difference at the given confidence level |
 
 ### `Stats` interface
 

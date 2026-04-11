@@ -1,12 +1,15 @@
 import {expect} from '@jest/globals';
 import {toCompleteWithin, toResolveWithin} from './matchers-single';
 import {toCompleteWithinQuantile, toResolveWithinQuantile} from './matchers-quantile';
+import {toBeFasterThan, toResolveFasterThan} from './matchers-comparative';
 
 expect.extend({
   toCompleteWithin,
   toCompleteWithinQuantile,
   toResolveWithin,
-  toResolveWithinQuantile
+  toResolveWithinQuantile,
+  toBeFasterThan,
+  toResolveFasterThan,
 });
 
 declare global {
@@ -38,6 +41,30 @@ declare global {
         iterations: number,
         quantile: number,
         warmup?: number,
+        outliers?: 'remove' | 'keep',
+        setup?: () => T | Promise<T>,
+        teardown?: (suiteState: T) => void | Promise<void>,
+        setupEach?: (suiteState: T) => U | Promise<U>,
+        teardownEach?: (suiteState: T, iterState: U) => void | Promise<void>,
+        allowedErrorRate?: number,
+      }): Promise<R>;
+
+      toBeFasterThan<T = void, U = void>(comparisonFn: (...args: unknown[]) => unknown, options: {
+        iterations: number,
+        warmup?: number,
+        confidence?: number,
+        outliers?: 'remove' | 'keep',
+        setup?: () => T,
+        teardown?: (suiteState: T) => void,
+        setupEach?: (suiteState: T) => U,
+        teardownEach?: (suiteState: T, iterState: U) => void,
+        allowedErrorRate?: number,
+      }): R;
+
+      toResolveFasterThan<T = void, U = void>(comparisonFn: (...args: unknown[]) => Promise<unknown>, options: {
+        iterations: number,
+        warmup?: number,
+        confidence?: number,
         outliers?: 'remove' | 'keep',
         setup?: () => T | Promise<T>,
         teardown?: (suiteState: T) => void | Promise<void>,

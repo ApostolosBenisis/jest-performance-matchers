@@ -1,8 +1,8 @@
 import {
   classifyRME, classifyCV, classifyMAD, classifySampleAdequacy,
-  generateInterpretation, formatTag, Tag
+  generateInterpretation, generateComparisonInterpretation, formatTag, Tag
 } from '../src/diagnostics';
-import {Stats} from '../src/metrics';
+import {Stats, WelchTTestResult} from '../src/metrics';
 
 describe("formatTag", () => {
   test("should combine label and range into a display string", () => {
@@ -560,5 +560,226 @@ describe("generateInterpretation", () => {
 
     // THEN no excluded-runs note is appended
     expect(actualResult).not.toContain('iterations were excluded');
+  });
+});
+
+describe("Test generateComparisonInterpretation function", () => {
+  function buildCompStats(overrides: Partial<Stats>): Stats {
+    return {
+      n: 31, min: 1, max: 10, mean: 5, median: 5, stddev: 1,
+      marginOfError: 0.35, relativeMarginOfError: 7.0,
+      confidenceInterval: [4.65, 5.35],
+      coefficientOfVariation: 0.05, skewness: 0, mad: 1, isSmallSample: false,
+      confidenceMethod: 'z', confidenceCriticalValue: 1.96, warnings: [],
+      ...overrides,
+    };
+  }
+
+  function buildTTest(overrides: Partial<WelchTTestResult> = {}): WelchTTestResult {
+    return {
+      t: -5, df: 18, pValue: 0.001, meanDifference: -5,
+      standardError: 1, confidenceInterval: [-7, -3],
+      ...overrides,
+    };
+  }
+
+  test("should return statistically significant faster when Function A has lower mean", () => {
+    // GIVEN Function A with mean=5ms, Function B with mean=10ms, and a significant p-value
+    const givenFunctionAStats = buildCompStats({relativeMarginOfError: 5, coefficientOfVariation: 0.1, mean: 5, median: 5});
+    const givenFunctionBStats = buildCompStats({relativeMarginOfError: 5, coefficientOfVariation: 0.1, mean: 10, median: 10});
+    const givenTTest = buildTTest({pValue: 0.001, meanDifference: -5});
+
+    // WHEN generating comparison interpretation
+    const actualResult = generateComparisonInterpretation(givenFunctionAStats, givenFunctionBStats, givenTTest, 0.95);
+
+    // THEN it reports Function A is statistically significantly faster with the p-value and difference
+    expect(actualResult).toContain('statistically significantly faster');
+    expect(actualResult).toContain('p=0.0010');
+    expect(actualResult).toContain('5.00ms');
+  });
+
+  test("should return practically negligible when difference is less than 1%", () => {
+    // GIVEN Function A with mean=99.95ms vs Function B with mean=100ms (0.05% difference) and a significant p-value
+    const givenFunctionAStats = buildCompStats({relativeMarginOfError: 5, coefficientOfVariation: 0.1, mean: 99.95, median: 99.95});
+    const givenFunctionBStats = buildCompStats({relativeMarginOfError: 5, coefficientOfVariation: 0.1, mean: 100, median: 100});
+    const givenTTest = buildTTest({pValue: 0.001, meanDifference: -0.05});
+
+    // WHEN generating comparison interpretation
+    const actualResult = generateComparisonInterpretation(givenFunctionAStats, givenFunctionBStats, givenTTest, 0.95);
+
+    // THEN it flags the difference as practically negligible despite being significant
+    expect(actualResult).toContain('statistically significantly faster');
+    expect(actualResult).toContain('less than 1%');
+    expect(actualResult).toContain('practically negligible');
+  });
+
+  test("should return modest practical difference when difference is 1-5%", () => {
+    // GIVEN Function A with mean=97ms vs Function B with mean=100ms (3% difference) and a significant p-value
+    const givenFunctionAStats = buildCompStats({relativeMarginOfError: 5, coefficientOfVariation: 0.1, mean: 97, median: 97});
+    const givenFunctionBStats = buildCompStats({relativeMarginOfError: 5, coefficientOfVariation: 0.1, mean: 100, median: 100});
+    const givenTTest = buildTTest({pValue: 0.001, meanDifference: -3});
+
+    // WHEN generating comparison interpretation
+    const actualResult = generateComparisonInterpretation(givenFunctionAStats, givenFunctionBStats, givenTTest, 0.95);
+
+    // THEN it describes the practical difference as modest
+    expect(actualResult).toContain('statistically significantly faster');
+    expect(actualResult).toContain('modest');
+  });
+
+  test("should return no significant evidence when Function A trends faster but p-value is high", () => {
+    // GIVEN Function A slightly faster than Function B (9ms vs 10ms) but with a non-significant p-value
+    const givenFunctionAStats = buildCompStats({relativeMarginOfError: 5, coefficientOfVariation: 0.1, mean: 9, median: 9});
+    const givenFunctionBStats = buildCompStats({relativeMarginOfError: 5, coefficientOfVariation: 0.1, mean: 10, median: 10});
+    const givenTTest = buildTTest({pValue: 0.15, meanDifference: -1});
+
+    // WHEN generating comparison interpretation
+    const actualResult = generateComparisonInterpretation(givenFunctionAStats, givenFunctionBStats, givenTTest, 0.95);
+
+    // THEN it reports no significant evidence and suggests increasing iterations
+    expect(actualResult).toContain('no statistically significant evidence');
+    expect(actualResult).toContain('trends faster');
+    expect(actualResult).toContain('increase iterations');
+  });
+
+  test("should return appears slower when mean difference is positive", () => {
+    // GIVEN Function A is slower than Function B (15ms vs 10ms) with a high p-value
+    const givenFunctionAStats = buildCompStats({relativeMarginOfError: 5, coefficientOfVariation: 0.1, mean: 15, median: 15});
+    const givenFunctionBStats = buildCompStats({relativeMarginOfError: 5, coefficientOfVariation: 0.1, mean: 10, median: 10});
+    const givenTTest = buildTTest({pValue: 0.99, meanDifference: 5});
+
+    // WHEN generating comparison interpretation
+    const actualResult = generateComparisonInterpretation(givenFunctionAStats, givenFunctionBStats, givenTTest, 0.95);
+
+    // THEN it reports Function A appears to be slower (not faster)
+    expect(actualResult).toContain('appears to be slower');
+    expect(actualResult).toContain('not faster');
+  });
+
+  test("should return identical mean timing when mean difference is zero", () => {
+    // GIVEN Function A and Function B with identical means (10ms each) and zero mean difference
+    const givenFunctionAStats = buildCompStats({relativeMarginOfError: 5, coefficientOfVariation: 0.1, mean: 10, median: 10});
+    const givenFunctionBStats = buildCompStats({relativeMarginOfError: 5, coefficientOfVariation: 0.1, mean: 10, median: 10});
+    const givenTTest = buildTTest({pValue: 0.5, meanDifference: 0});
+
+    // WHEN generating comparison interpretation
+    const actualResult = generateComparisonInterpretation(givenFunctionAStats, givenFunctionBStats, givenTTest, 0.95);
+
+    // THEN it reports identical mean timing
+    expect(actualResult).toContain('identical mean timing');
+  });
+
+  test("should return unreliable warning when Function A has POOR RME", () => {
+    // GIVEN Function A with POOR RME (40%) and Function B with GOOD RME (5%)
+    const givenFunctionAStats = buildCompStats({relativeMarginOfError: 40, coefficientOfVariation: 0.5, mean: 10, median: 10});
+    const givenFunctionBStats = buildCompStats({relativeMarginOfError: 5, coefficientOfVariation: 0.1, mean: 15, median: 15});
+    const givenTTest = buildTTest({pValue: 0.01, meanDifference: -5});
+
+    // WHEN generating comparison interpretation
+    const actualResult = generateComparisonInterpretation(givenFunctionAStats, givenFunctionBStats, givenTTest, 0.95);
+
+    // THEN it warns results are unreliable due to Function A's POOR RME
+    expect(actualResult).toContain('unreliable');
+    expect(actualResult).toContain('Function A has');
+    expect(actualResult).toContain('POOR RME');
+  });
+
+  test("should return unreliable warning when Function B has POOR RME", () => {
+    // GIVEN Function A with GOOD RME (5%) and Function B with POOR RME (40%)
+    const givenFunctionAStats = buildCompStats({relativeMarginOfError: 5, coefficientOfVariation: 0.1, mean: 10, median: 10});
+    const givenFunctionBStats = buildCompStats({relativeMarginOfError: 40, coefficientOfVariation: 0.5, mean: 15, median: 15});
+    const givenTTest = buildTTest({pValue: 0.01, meanDifference: -5});
+
+    // WHEN generating comparison interpretation
+    const actualResult = generateComparisonInterpretation(givenFunctionAStats, givenFunctionBStats, givenTTest, 0.95);
+
+    // THEN it warns results are unreliable due to Function B's POOR RME
+    expect(actualResult).toContain('unreliable');
+    expect(actualResult).toContain('Function B has');
+    expect(actualResult).toContain('POOR RME');
+  });
+
+  test("should return unreliable warning when both functions have POOR RME", () => {
+    // GIVEN both functions with POOR RME (40% each)
+    const givenFunctionAStats = buildCompStats({relativeMarginOfError: 40, coefficientOfVariation: 0.5, mean: 10, median: 10});
+    const givenFunctionBStats = buildCompStats({relativeMarginOfError: 40, coefficientOfVariation: 0.5, mean: 15, median: 15});
+    const givenTTest = buildTTest({pValue: 0.01, meanDifference: -5});
+
+    // WHEN generating comparison interpretation
+    const actualResult = generateComparisonInterpretation(givenFunctionAStats, givenFunctionBStats, givenTTest, 0.95);
+
+    // THEN it warns results are unreliable due to both functions having POOR RME
+    expect(actualResult).toContain('unreliable');
+    expect(actualResult).toContain('both functions have');
+    expect(actualResult).toContain('POOR RME');
+  });
+
+  test("should return reliability warning when one function has null RME (near-zero mean)", () => {
+    // GIVEN Function A with null RME (mean=0) and Function B with GOOD RME
+    const givenFunctionAStats = buildCompStats({relativeMarginOfError: null, coefficientOfVariation: null, mean: 0, median: 0});
+    const givenFunctionBStats = buildCompStats({relativeMarginOfError: 5, coefficientOfVariation: 0.1, mean: 10, median: 10});
+    const givenTTest = buildTTest({pValue: 0.01, meanDifference: -10});
+
+    // WHEN generating comparison interpretation
+    const actualResult = generateComparisonInterpretation(givenFunctionAStats, givenFunctionBStats, givenTTest, 0.95);
+
+    // THEN it warns that reliability cannot be assessed due to near-zero mean
+    expect(actualResult).toContain('reliability cannot be assessed');
+    expect(actualResult).toContain('near-zero mean');
+  });
+
+  test("should return reliability warning when both functions have null RME (both near-zero mean)", () => {
+    // GIVEN both functions with null RME (both means are 0)
+    const givenFunctionAStats = buildCompStats({relativeMarginOfError: null, coefficientOfVariation: null, mean: 0, median: 0});
+    const givenFunctionBStats = buildCompStats({relativeMarginOfError: null, coefficientOfVariation: null, mean: 0, median: 0});
+    const givenTTest = buildTTest({pValue: 0.5, meanDifference: 0});
+
+    // WHEN generating comparison interpretation
+    const actualResult = generateComparisonInterpretation(givenFunctionAStats, givenFunctionBStats, givenTTest, 0.95);
+
+    // THEN it warns that reliability cannot be assessed due to near-zero mean
+    expect(actualResult).toContain('reliability cannot be assessed');
+    expect(actualResult).toContain('near-zero mean');
+  });
+
+  test("should format p-value as <0.0001 when p-value is below 0.0001", () => {
+    // GIVEN a very large mean difference (5ms vs 50ms) with an extremely small p-value
+    const givenFunctionAStats = buildCompStats({relativeMarginOfError: 5, coefficientOfVariation: 0.1, mean: 5, median: 5});
+    const givenFunctionBStats = buildCompStats({relativeMarginOfError: 5, coefficientOfVariation: 0.1, mean: 50, median: 50});
+    const givenTTest = buildTTest({pValue: 0.00001, meanDifference: -45});
+
+    // WHEN generating comparison interpretation
+    const actualResult = generateComparisonInterpretation(givenFunctionAStats, givenFunctionBStats, givenTTest, 0.95);
+
+    // THEN it formats the p-value as <0.0001
+    expect(actualResult).toContain('p=<0.0001');
+  });
+
+  test("should use custom confidence level when determining significance", () => {
+    // GIVEN p=0.08 (significant at alpha=0.10 but not at alpha=0.05)
+    const givenFunctionAStats = buildCompStats({relativeMarginOfError: 5, coefficientOfVariation: 0.1, mean: 9, median: 9});
+    const givenFunctionBStats = buildCompStats({relativeMarginOfError: 5, coefficientOfVariation: 0.1, mean: 10, median: 10});
+    const givenTTest = buildTTest({pValue: 0.08, meanDifference: -1});
+
+    // WHEN generating comparison interpretation at 95% and 90% confidence
+    const actualResultStrict = generateComparisonInterpretation(givenFunctionAStats, givenFunctionBStats, givenTTest, 0.95);
+    const actualResultRelaxed = generateComparisonInterpretation(givenFunctionAStats, givenFunctionBStats, givenTTest, 0.90);
+
+    // THEN 95% reports not significant but 90% reports significant
+    expect(actualResultStrict).toContain('no statistically significant evidence');
+    expect(actualResultRelaxed).toContain('statistically significantly faster');
+  });
+
+  test("should not throw when meanB is zero (pctDiff edge case)", () => {
+    // GIVEN Function B with mean=0 (division-by-zero edge case for percentage calculation)
+    const givenFunctionAStats = buildCompStats({relativeMarginOfError: 5, coefficientOfVariation: 0.1, mean: -1, median: -1});
+    const givenFunctionBStats = buildCompStats({relativeMarginOfError: 5, coefficientOfVariation: 0.1, mean: 0, median: 0});
+    const givenTTest = buildTTest({pValue: 0.001, meanDifference: -1});
+
+    // WHEN generating comparison interpretation
+    const actualResult = generateComparisonInterpretation(givenFunctionAStats, givenFunctionBStats, givenTTest, 0.95);
+
+    // THEN it reports significance without throwing a division-by-zero error
+    expect(actualResult).toContain('statistically significantly faster');
   });
 });

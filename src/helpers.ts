@@ -1,5 +1,5 @@
 import {printReceived, printExpected} from 'jest-matcher-utils';
-import {calcQuantile, calcStats, removeOutliers, Stats} from "./metrics";
+import {calcQuantile, calcStats, removeOutliers, Stats, welchTTest, WelchTTestResult} from "./metrics";
 import {calcShapeDiagnostics} from "./shape";
 import {
   classifyRME,
@@ -7,7 +7,9 @@ import {
   classifyMAD,
   classifySampleAdequacy,
   generateInterpretation,
-  formatTag
+  generateComparisonInterpretation,
+  formatTag,
+  formatPValue,
 } from "./diagnostics";
 
 export interface ErrorInfo {
@@ -43,9 +45,13 @@ export function formatStatsBlock(stats: Stats, durations: number[], expectedDura
   const skewnessText = stats.skewness === null ? 'N/A' : stats.skewness.toFixed(2);
 
   const madTag = classifyMAD(stats.mad, stats.median);
-  const madText = stats.mad === null
-    ? 'Median Absolute Deviation (MAD): N/A'
-    : `Median Absolute Deviation (MAD): ${stats.mad.toFixed(2)}ms${madTag !== null ? ` [${formatTag(madTag)}]` : ''}`;
+  let madText: string;
+  if (stats.mad === null) {
+    madText = 'Median Absolute Deviation (MAD): N/A';
+  } else {
+    const madTagSuffix = madTag === null ? '' : ` [${formatTag(madTag)}]`;
+    madText = `Median Absolute Deviation (MAD): ${stats.mad.toFixed(2)}ms${madTagSuffix}`;
+  }
 
   const lines = [
     `Statistics (n=${stats.n}${setupTeardownActive ? ', setup/teardown active' : ''}): mean=${formatStatValue(stats.mean)}ms, median=${formatStatValue(stats.median)}ms, stddev=${formatStatValue(stats.stddev)}ms`,
@@ -75,10 +81,15 @@ export function formatStatsBlock(stats: Stats, durations: number[], expectedDura
   return lines.join('\n');
 }
 
-export function processQuantileResults(
-  durations: number[], count: number, quantile: number, errorCount: number, allowedErrorRate: number,
-  expectedDurationInMilliseconds: number, setupTeardownActive: boolean, removeOutliersEnabled: boolean
-): { message: () => string; pass: boolean } {
+export interface QuantileResultsOptions {
+  durations: number[]; count: number; quantile: number;
+  errorCount: number; allowedErrorRate: number;
+  expectedDurationInMilliseconds: number;
+  setupTeardownActive: boolean; removeOutliersEnabled: boolean;
+}
+
+export function processQuantileResults(opts: QuantileResultsOptions): { message: () => string; pass: boolean } {
+  const {durations, count, quantile, errorCount, allowedErrorRate, expectedDurationInMilliseconds, setupTeardownActive, removeOutliersEnabled} = opts;
   if (durations.length === 0) {
     return {
       pass: false,
@@ -143,4 +154,121 @@ export function assertDuration(actualDuration: number, expectedDurationInMillise
       pass: false,
     };
   }
+}
+
+function formatTStatistic(t: number): string {
+  if (t === Infinity) return 'Infinity';
+  if (t === -Infinity) return '-Infinity';
+  return t.toFixed(2);
+}
+
+function formatDirection(meanDifference: number, absDiff: number, pctDiff: number): string {
+  if (meanDifference === 0) return 'Mean difference: 0.00ms (identical means)';
+  const dir = meanDifference < 0 ? 'faster' : 'slower';
+  return `Mean difference: ${meanDifference.toFixed(2)}ms (Function A is ${dir} by ${absDiff.toFixed(2)}ms, ${pctDiff.toFixed(1)}%)`;
+}
+
+export interface ComparativeStatsBlockOptions {
+  statsA: Stats; statsB: Stats;
+  durationsA: number[]; durationsB: number[];
+  tTest: WelchTTestResult; confidence: number;
+  setupTeardownActive: boolean;
+  errorInfoA?: ErrorInfo; errorInfoB?: ErrorInfo;
+}
+
+export function formatComparativeStatsBlock(opts: ComparativeStatsBlockOptions): string {
+  const {statsA, statsB, durationsA, durationsB, tTest, confidence, setupTeardownActive, errorInfoA, errorInfoB} = opts;
+  const blockA = formatStatsBlock(statsA, durationsA, undefined, setupTeardownActive, errorInfoA);
+  const blockB = formatStatsBlock(statsB, durationsB, undefined, setupTeardownActive, errorInfoB);
+
+  const absDiff = Math.abs(tTest.meanDifference);
+  const meanB = statsB.mean as number; // guaranteed non-null: callers ensure n >= 2
+  const pctDiff = meanB === 0 ? 0 : (absDiff / Math.abs(meanB)) * 100;
+
+  const lines = [
+    '--- Function A ---',
+    blockA,
+    '',
+    '--- Function B ---',
+    blockB,
+    '',
+    '--- Comparison ---',
+    formatDirection(tTest.meanDifference, absDiff, pctDiff),
+    `Welch's t-test: t=${formatTStatistic(tTest.t)}, df=${tTest.df.toFixed(1)}, p=${formatPValue(tTest.pValue)} (one-sided)`,
+    `Confidence interval for difference: ${(confidence * 100).toFixed(0)}% [${tTest.confidenceInterval[0].toFixed(2)}, ${tTest.confidenceInterval[1].toFixed(2)}]ms`,
+    `Result: ${generateComparisonInterpretation(statsA, statsB, tTest, confidence)}`,
+  ];
+
+  return lines.join('\n');
+}
+
+export interface ComparativeResultsOptions {
+  durationsA: number[]; durationsB: number[];
+  count: number;
+  errorCountA: number; errorCountB: number;
+  allowedErrorRate: number; confidence: number;
+  setupTeardownActive: boolean; removeOutliersEnabled: boolean;
+}
+
+export function processComparativeResults(opts: ComparativeResultsOptions): { message: () => string; pass: boolean } {
+  const {durationsA, durationsB, count, errorCountA, errorCountB, allowedErrorRate, confidence, setupTeardownActive, removeOutliersEnabled} = opts;
+  // Check all-failed per function
+  if (durationsA.length === 0) {
+    return {pass: false, message: () => `Function A: all ${count} iterations failed (100% error rate, allowed ${(allowedErrorRate * 100).toFixed(1)}%)`};
+  }
+  if (durationsB.length === 0) {
+    return {pass: false, message: () => `Function B: all ${count} iterations failed (100% error rate, allowed ${(allowedErrorRate * 100).toFixed(1)}%)`};
+  }
+
+  // Check error rate per function
+  const errorRateA = errorCountA / count;
+  if (errorRateA > allowedErrorRate) {
+    return {pass: false, message: () => `Function A: error rate ${errorCountA}/${count} (${(errorRateA * 100).toFixed(1)}%) exceeds allowed ${(allowedErrorRate * 100).toFixed(1)}%`};
+  }
+  const errorRateB = errorCountB / count;
+  if (errorRateB > allowedErrorRate) {
+    return {pass: false, message: () => `Function B: error rate ${errorCountB}/${count} (${(errorRateB * 100).toFixed(1)}%) exceeds allowed ${(allowedErrorRate * 100).toFixed(1)}%`};
+  }
+
+  // Remove outliers if enabled
+  const effectiveA = removeOutliersEnabled ? removeOutliers(durationsA) : durationsA;
+  /* istanbul ignore next -- defensive guard: Tukey's fences cannot remove all points from a homogeneous dataset */
+  if (effectiveA.length === 0) {
+    return {pass: false, message: () => `Function A: all ${durationsA.length} successful iterations were removed as outliers`};
+  }
+  const effectiveB = removeOutliersEnabled ? removeOutliers(durationsB) : durationsB;
+  /* istanbul ignore next -- defensive guard: Tukey's fences cannot remove all points from a homogeneous dataset */
+  if (effectiveB.length === 0) {
+    return {pass: false, message: () => `Function B: all ${durationsB.length} successful iterations were removed as outliers`};
+  }
+
+  // Check minimum sample size for t-test
+  if (effectiveA.length < 2) {
+    return {pass: false, message: () => `Function A: insufficient data after processing (n=${effectiveA.length}); Welch's t-test requires at least 2 data points per function`};
+  }
+  if (effectiveB.length < 2) {
+    return {pass: false, message: () => `Function B: insufficient data after processing (n=${effectiveB.length}); Welch's t-test requires at least 2 data points per function`};
+  }
+
+  const statsA = calcStats(effectiveA);
+  const statsB = calcStats(effectiveB);
+  const tTest = welchTTest(statsA, statsB, confidence);
+  const alpha = 1 - confidence;
+  const pass = tTest.pValue < alpha;
+
+  const errorInfoA: ErrorInfo | undefined = errorCountA > 0 ? {errorCount: errorCountA, totalIterations: count, allowedRate: allowedErrorRate} : undefined;
+  const errorInfoB: ErrorInfo | undefined = errorCountB > 0 ? {errorCount: errorCountB, totalIterations: count, allowedRate: allowedErrorRate} : undefined;
+
+  const statsBlock = formatComparativeStatsBlock({statsA, statsB, durationsA: effectiveA, durationsB: effectiveB, tTest, confidence, setupTeardownActive, errorInfoA, errorInfoB});
+
+  if (pass) {
+    return {
+      pass: true,
+      message: () => `expected Function A NOT to be faster than Function B,\nbut A is statistically significantly faster (p=${tTest.pValue < 0.0001 ? '<0.0001' : tTest.pValue.toFixed(4)} < α=${alpha.toFixed(2)})\n\n${statsBlock}`,
+    };
+  }
+  return {
+    pass: false,
+    message: () => `expected Function A to be faster than Function B,\nbut no statistically significant difference was found (p=${tTest.pValue.toFixed(4)} >= α=${alpha.toFixed(2)})\n\n${statsBlock}`,
+  };
 }

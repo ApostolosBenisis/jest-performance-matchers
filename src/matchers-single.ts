@@ -10,25 +10,25 @@ import {assertDuration} from "./helpers";
  **/
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- expect.extend erases generics at runtime
 export function toCompleteWithin(callback: (state: any) => unknown, expectedDurationInMilliseconds: number, options?: {
-    setup?: () => unknown,
-    teardown?: (state: unknown) => void,
+  setup?: () => unknown,
+  teardown?: (state: unknown) => void,
 }) {
-    validateCallback(callback);
-    validateDuration(expectedDurationInMilliseconds);
-    validateSetupTeardown(options);
+  validateCallback(callback);
+  validateDuration(expectedDurationInMilliseconds);
+  validateSetupTeardown(options);
 
-    const setupResult = options?.setup ? options.setup() : undefined;
-    let actualDuration: number;
-    try {
-        const t0 = nowInMillis();
-        callback(setupResult);
-        const t1 = nowInMillis();
-        actualDuration = t1 - t0;
-    } finally {
-        if (options?.teardown) options.teardown(setupResult);
-    }
+  const setupResult = options?.setup ? options.setup() : undefined;
+  let actualDuration: number;
+  try {
+    const t0 = nowInMillis();
+    callback(setupResult);
+    const t1 = nowInMillis();
+    actualDuration = t1 - t0;
+  } finally {
+    if (options?.teardown) options.teardown(setupResult);
+  }
 
-    return assertDuration(actualDuration, expectedDurationInMilliseconds);
+  return assertDuration(actualDuration, expectedDurationInMilliseconds);
 }
 
 /**
@@ -39,22 +39,22 @@ export function toCompleteWithin(callback: (state: any) => unknown, expectedDura
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- expect.extend erases generics at runtime
 export async function toResolveWithin(promise: (state: any) => Promise<unknown>, expectedDurationInMilliseconds: number, options?: {
-    setup?: () => unknown | Promise<unknown>,
-    teardown?: (state: unknown) => void | Promise<void>,
+  setup?: () => unknown | Promise<unknown>,
+  teardown?: (state: unknown) => void | Promise<void>,
 }) {
-    validateCallback(promise);
-    validateDuration(expectedDurationInMilliseconds);
-    validateSetupTeardown(options);
+  validateCallback(promise);
+  validateDuration(expectedDurationInMilliseconds);
+  validateSetupTeardown(options);
 
-    const setupResult = options?.setup ? await options.setup() : undefined;
-    let actualDuration: number;
-    try {
-        const t0 = nowInMillis();
-        await promise(setupResult);
-        const t1 = nowInMillis();
-        actualDuration = t1 - t0;
-    } finally {
-        if (options?.teardown) await options.teardown(setupResult);
-    }
-    return assertDuration(actualDuration, expectedDurationInMilliseconds);
+  const setupResult = options?.setup ? await options.setup() : undefined;
+  let actualDuration: number;
+  try {
+    const t0 = nowInMillis();
+    await promise(setupResult);
+    const t1 = nowInMillis();
+    actualDuration = t1 - t0;
+  } finally {
+    if (options?.teardown) await options.teardown(setupResult);
+  }
+  return assertDuration(actualDuration, expectedDurationInMilliseconds);
 }
