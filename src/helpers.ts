@@ -345,33 +345,28 @@ interface ThroughputStatsBlockOptions {
   errorInfo?: ErrorInfo;
 }
 
-function formatThroughputStatsBlock(opts: ThroughputStatsBlockOptions): string {
-  const {stats, durations, actualOpsPerSecond, expectedOpsPerSecond, duration, totalOps, setupTeardownActive, errorInfo} = opts;
-
-  // Throughput CI: invert per-op timing CI bounds (inversion flips upper/lower)
-  let throughputCIText: string;
-  if (stats.confidenceInterval === null) {
-    throughputCIText = '  CI 95%: N/A (insufficient data)';
-  } else {
-    const [ciLower, ciUpper] = stats.confidenceInterval;
-    if (ciLower <= 0) {
-      throughputCIText = '  CI 95%: N/A (per-op CI lower bound is non-positive)';
-    } else {
-      const throughputLower = 1000 / ciUpper;
-      const throughputUpper = 1000 / ciLower;
-      throughputCIText = `  CI 95%: [${Math.round(throughputLower)}, ${Math.round(throughputUpper)}] ops/sec`;
-    }
+function formatThroughputCI(confidenceInterval: [number, number] | null): string {
+  if (confidenceInterval === null) {
+    return '  CI 95%: N/A (insufficient data)';
   }
+  const [ciLower, ciUpper] = confidenceInterval;
+  if (ciLower <= 0) {
+    return '  CI 95%: N/A (per-op CI lower bound is non-positive)';
+  }
+  const throughputLower = 1000 / ciUpper;
+  const throughputUpper = 1000 / ciLower;
+  return `  CI 95%: [${Math.round(throughputLower)}, ${Math.round(throughputUpper)}] ops/sec`;
+}
 
-  // Target comparison
+function formatTargetComparison(actualOpsPerSecond: number, expectedOpsPerSecond: number): string {
   const diff = actualOpsPerSecond - expectedOpsPerSecond;
   const absDiff = Math.abs(diff);
   const pctDiff = (absDiff / expectedOpsPerSecond) * 100;
-  const targetText = diff >= 0
-    ? `  Target: ${Math.round(expectedOpsPerSecond)} ops/sec — surplus of ${Math.round(absDiff)} ops/sec (${pctDiff.toFixed(1)}%)`
-    : `  Target: ${Math.round(expectedOpsPerSecond)} ops/sec — shortfall of ${Math.round(absDiff)} ops/sec (${pctDiff.toFixed(1)}%)`;
+  const label = diff >= 0 ? 'surplus' : 'shortfall';
+  return `  Target: ${Math.round(expectedOpsPerSecond)} ops/sec — ${label} of ${Math.round(absDiff)} ops/sec (${pctDiff.toFixed(1)}%)`;
+}
 
-  // Per-op timing section (reuse classification primitives)
+function formatPerOpTimingSection(stats: Stats, durations: number[], setupTeardownActive: boolean): string[] {
   const rmeTag = classifyRME(stats.relativeMarginOfError);
   const cvTag = classifyCV(stats.coefficientOfVariation);
   const madTag = classifyMAD(stats.mad, stats.median);
@@ -403,17 +398,25 @@ function formatThroughputStatsBlock(opts: ThroughputStatsBlockOptions): string {
     madText = `${stats.mad.toFixed(2)}ms${madTagSuffix}`;
   }
 
-  const interpretation = generateThroughputInterpretation(stats, actualOpsPerSecond, expectedOpsPerSecond, errorInfo);
-
-  const lines = [
-    `Throughput: ${Math.round(actualOpsPerSecond)} ops/sec over ${Math.round(duration)}ms (${totalOps} total operations)`,
-    throughputCIText,
-    targetText,
-    '',
+  return [
     `Per-operation timing (n=${stats.n}${setupTeardownActive ? ', setup/teardown active' : ''}): mean=${formatStatValue(stats.mean)}ms, median=${formatStatValue(stats.median)}ms, stddev=${formatStatValue(stats.stddev)}ms, MAD=${madText}`,
     `  CI 95%: ${ciText} | RME: ${rmeText} | CV: ${cvText}`,
     `  Distribution: min=${formatStatValue(stats.min)}ms | P25=${formatStatValue(p25)}ms | P50=${formatStatValue(p50)}ms | P75=${formatStatValue(p75)}ms | P90=${formatStatValue(p90)}ms | max=${formatStatValue(stats.max)}ms`,
     `  Shape: ${shapeDiag.label} (skewness=${skewnessText}) | ${shapeDiag.sparkline}`,
+  ];
+}
+
+function formatThroughputStatsBlock(opts: ThroughputStatsBlockOptions): string {
+  const {stats, durations, actualOpsPerSecond, expectedOpsPerSecond, duration, totalOps, setupTeardownActive, errorInfo} = opts;
+
+  const interpretation = generateThroughputInterpretation(stats, actualOpsPerSecond, expectedOpsPerSecond, errorInfo);
+
+  const lines = [
+    `Throughput: ${Math.round(actualOpsPerSecond)} ops/sec over ${Math.round(duration)}ms (${totalOps} total operations)`,
+    formatThroughputCI(stats.confidenceInterval),
+    formatTargetComparison(actualOpsPerSecond, expectedOpsPerSecond),
+    '',
+    ...formatPerOpTimingSection(stats, durations, setupTeardownActive),
     '',
     `Interpretation: ${interpretation}`,
   ];
