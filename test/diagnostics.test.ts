@@ -2,6 +2,7 @@ import {
   classifyRME, classifyCV, classifyMAD, classifySampleAdequacy,
   generateInterpretation, generateComparisonInterpretation, generateThroughputInterpretation, formatTag, Tag
 } from '../src/diagnostics';
+import {formatMs} from '../src/format';
 import {Stats, WelchTTestResult} from '../src/metrics';
 
 describe("formatTag", () => {
@@ -491,8 +492,8 @@ describe("generateInterpretation", () => {
     const actualResult = generateInterpretation(givenStats, givenThreshold);
 
     // THEN it confirms the CI is within budget
-    const expectedLowerBound = givenCI[0].toFixed(2);
-    const expectedUpperBound = givenCI[1].toFixed(2);
+    const expectedLowerBound = formatMs(givenCI[0]);
+    const expectedUpperBound = formatMs(givenCI[1]);
     expect(actualResult).toContain(`CI range [${expectedLowerBound}, ${expectedUpperBound}]ms is within your ${givenThreshold}ms threshold`);
     expect(actualResult).toContain('safely within budget');
   });
@@ -507,7 +508,7 @@ describe("generateInterpretation", () => {
     const actualResult = generateInterpretation(givenStats, givenThreshold);
 
     // THEN it warns the upper bound exceeds budget
-    const expectedUpperBound = givenCI[1].toFixed(2);
+    const expectedUpperBound = formatMs(givenCI[1]);
     expect(actualResult).toContain(`CI upper bound (${expectedUpperBound}ms) exceeds your ${givenThreshold}ms threshold`);
     expect(actualResult).toContain('consider optimizing');
   });

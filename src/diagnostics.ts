@@ -1,4 +1,5 @@
 import {Stats, WelchTTestResult} from "./metrics";
+import {formatMs} from "./format";
 
 export type TagLabel = 'GOOD' | 'FAIR' | 'POOR';
 
@@ -143,12 +144,12 @@ function classifyReliability(rme: Tag, cv: Tag, mad: Tag | null, sample: Tag): s
 function appendCICheck(message: string, ci: [number, number], expectedDuration: number): string {
   const [lower, upper] = ci;
   if (lower > expectedDuration) {
-    return message + `. CI range [${lower.toFixed(2)}, ${upper.toFixed(2)}]ms is entirely above your ${expectedDuration}ms threshold — the code is almost certainly too slow`;
+    return message + `. CI range [${formatMs(lower)}, ${formatMs(upper)}]ms is entirely above your ${expectedDuration}ms threshold — the code is almost certainly too slow`;
   }
   if (upper > expectedDuration) {
-    return message + `. CI upper bound (${upper.toFixed(2)}ms) exceeds your ${expectedDuration}ms threshold — the true mean likely exceeds your budget, consider optimizing the code or raising the threshold`;
+    return message + `. CI upper bound (${formatMs(upper)}ms) exceeds your ${expectedDuration}ms threshold — the true mean likely exceeds your budget, consider optimizing the code or raising the threshold`;
   }
-  return message + `. CI range [${lower.toFixed(2)}, ${upper.toFixed(2)}]ms is within your ${expectedDuration}ms threshold — the mean is safely within budget`;
+  return message + `. CI range [${formatMs(lower)}, ${formatMs(upper)}]ms is within your ${expectedDuration}ms threshold — the mean is safely within budget`;
 }
 
 export function generateInterpretation(stats: Stats, expectedDuration?: number, errorInfo?: {
@@ -238,17 +239,17 @@ function formatSignificantResult(tTest: WelchTTestResult, absDiff: number, pctDi
   } else if (pctDiff < 5) {
     practical = '. The difference is modest (< 5%) — consider whether this is practically meaningful for your use case';
   }
-  return `Function A is statistically significantly faster than Function B (p=${formatPValue(tTest.pValue)} < α=${alpha.toFixed(2)}), with a mean difference of ${absDiff.toFixed(2)}ms (${pctDiff.toFixed(1)}%)${practical}`;
+  return `Function A is statistically significantly faster than Function B (p=${formatPValue(tTest.pValue)} < α=${alpha.toFixed(2)}), with a mean difference of ${formatMs(absDiff)}ms (${pctDiff.toFixed(1)}%)${practical}`;
 }
 
 function formatNotSignificantResult(tTest: WelchTTestResult, absDiff: number, pctDiff: number, alpha: number): string {
   if (tTest.meanDifference < 0) {
-    return `no statistically significant evidence that Function A is faster than Function B (p=${formatPValue(tTest.pValue)} >= α=${alpha.toFixed(2)}). Function A trends faster by ${absDiff.toFixed(2)}ms (${pctDiff.toFixed(1)}%) but the difference could be due to chance — increase iterations for more statistical power`;
+    return `no statistically significant evidence that Function A is faster than Function B (p=${formatPValue(tTest.pValue)} >= α=${alpha.toFixed(2)}). Function A trends faster by ${formatMs(absDiff)}ms (${pctDiff.toFixed(1)}%) but the difference could be due to chance — increase iterations for more statistical power`;
   }
   if (tTest.meanDifference === 0) {
     return `no statistically significant difference — both functions have identical mean timing (p=${formatPValue(tTest.pValue)} >= α=${alpha.toFixed(2)})`;
   }
-  return `Function A appears to be slower than Function B by ${absDiff.toFixed(2)}ms (${pctDiff.toFixed(1)}%), not faster (p=${formatPValue(tTest.pValue)} >= α=${alpha.toFixed(2)})`;
+  return `Function A appears to be slower than Function B by ${formatMs(absDiff)}ms (${pctDiff.toFixed(1)}%), not faster (p=${formatPValue(tTest.pValue)} >= α=${alpha.toFixed(2)})`;
 }
 
 export function formatPValue(p: number): string {

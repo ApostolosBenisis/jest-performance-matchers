@@ -12,6 +12,8 @@ import {
   formatTag,
   formatPValue,
 } from "./diagnostics";
+import {formatMs} from "./format";
+export {formatMs} from "./format";
 
 export interface ErrorInfo {
   errorCount: number;
@@ -20,7 +22,7 @@ export interface ErrorInfo {
 }
 
 export function formatStatValue(value: number | null): string {
-  return value === null ? 'N/A' : value.toFixed(2);
+  return value === null ? 'N/A' : formatMs(value);
 }
 
 export function formatStatsBlock(stats: Stats, durations: number[], expectedDuration?: number, setupTeardownActive?: boolean, errorInfo?: ErrorInfo): string {
@@ -29,7 +31,7 @@ export function formatStatsBlock(stats: Stats, durations: number[], expectedDura
 
   const ciText = stats.confidenceInterval === null
     ? 'Confidence Interval (CI): N/A (insufficient data)'
-    : `Confidence Interval (CI): 95% [${stats.confidenceInterval[0].toFixed(2)}, ${stats.confidenceInterval[1].toFixed(2)}]ms`;
+    : `Confidence Interval (CI): 95% [${formatMs(stats.confidenceInterval[0])}, ${formatMs(stats.confidenceInterval[1])}]ms`;
   const rmeText = stats.relativeMarginOfError === null || rmeTag === null
     ? 'Relative Margin of Error (RME): N/A'
     : `Relative Margin of Error (RME): ${stats.relativeMarginOfError.toFixed(2)}% [${formatTag(rmeTag)}]`;
@@ -51,7 +53,7 @@ export function formatStatsBlock(stats: Stats, durations: number[], expectedDura
     madText = 'Median Absolute Deviation (MAD): N/A';
   } else {
     const madTagSuffix = madTag === null ? '' : ` [${formatTag(madTag)}]`;
-    madText = `Median Absolute Deviation (MAD): ${stats.mad.toFixed(2)}ms${madTagSuffix}`;
+    madText = `Median Absolute Deviation (MAD): ${formatMs(stats.mad)}ms${madTagSuffix}`;
   }
 
   const lines = [
@@ -164,9 +166,9 @@ function formatTStatistic(t: number): string {
 }
 
 function formatDirection(meanDifference: number, absDiff: number, pctDiff: number): string {
-  if (meanDifference === 0) return 'Mean difference: 0.00ms (identical means)';
+  if (meanDifference === 0) return `Mean difference: ${formatMs(0)}ms (identical means)`;
   const dir = meanDifference < 0 ? 'faster' : 'slower';
-  return `Mean difference: ${meanDifference.toFixed(2)}ms (Function A is ${dir} by ${absDiff.toFixed(2)}ms, ${pctDiff.toFixed(1)}%)`;
+  return `Mean difference: ${formatMs(meanDifference)}ms (Function A is ${dir} by ${formatMs(absDiff)}ms, ${pctDiff.toFixed(1)}%)`;
 }
 
 export interface ComparativeStatsBlockOptions {
@@ -196,7 +198,7 @@ export function formatComparativeStatsBlock(opts: ComparativeStatsBlockOptions):
     '--- Comparison ---',
     formatDirection(tTest.meanDifference, absDiff, pctDiff),
     `Welch's t-test: t=${formatTStatistic(tTest.t)}, df=${tTest.df.toFixed(1)}, p=${formatPValue(tTest.pValue)} (one-sided)`,
-    `Confidence interval for difference: ${(confidence * 100).toFixed(0)}% [${tTest.confidenceInterval[0].toFixed(2)}, ${tTest.confidenceInterval[1].toFixed(2)}]ms`,
+    `Confidence interval for difference: ${(confidence * 100).toFixed(0)}% [${formatMs(tTest.confidenceInterval[0])}, ${formatMs(tTest.confidenceInterval[1])}]ms`,
     `Result: ${generateComparisonInterpretation(statsA, statsB, tTest, confidence)}`,
   ];
 
@@ -373,7 +375,7 @@ function formatPerOpTimingSection(stats: Stats, durations: number[], setupTeardo
 
   const ciText = stats.confidenceInterval === null
     ? 'N/A (insufficient data)'
-    : `[${stats.confidenceInterval[0].toFixed(2)}, ${stats.confidenceInterval[1].toFixed(2)}]ms`;
+    : `[${formatMs(stats.confidenceInterval[0])}, ${formatMs(stats.confidenceInterval[1])}]ms`;
   const rmeText = stats.relativeMarginOfError === null || rmeTag === null
     ? 'N/A'
     : `${stats.relativeMarginOfError.toFixed(2)}% [${formatTag(rmeTag)}]`;
@@ -395,7 +397,7 @@ function formatPerOpTimingSection(stats: Stats, durations: number[], setupTeardo
   } else {
     /* istanbul ignore next -- defensive guard: madTag is null only when median is 0, which implies mad is 0, not a realistic throughput scenario */
     const madTagSuffix = madTag === null ? '' : ` [${formatTag(madTag)}]`;
-    madText = `${stats.mad.toFixed(2)}ms${madTagSuffix}`;
+    madText = `${formatMs(stats.mad)}ms${madTagSuffix}`;
   }
 
   return [

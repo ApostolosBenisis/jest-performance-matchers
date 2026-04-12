@@ -9,6 +9,7 @@ import {
   generateInterpretation,
   formatTag
 } from '../src/diagnostics';
+import {formatMs} from '../src/format';
 import {printExpected, printReceived} from 'jest-matcher-utils';
 import {mockFunctionProcessTimes} from './test-utils';
 
@@ -18,14 +19,14 @@ function buildStatsBlock(durations: number[], expectedDuration?: number, setupTe
   allowedRate: number
 }): string {
   const stats = metrics.calcStats(durations);
-  const fmt = (v: number | null) => v !== null ? v.toFixed(2) : 'N/A';
+  const fmt = (v: number | null) => v !== null ? formatMs(v) : 'N/A';
 
   const rmeTag = classifyRME(stats.relativeMarginOfError);
   const cvTag = classifyCV(stats.coefficientOfVariation);
 
   const ciText = stats.confidenceInterval === null
     ? 'Confidence Interval (CI): N/A (insufficient data)'
-    : `Confidence Interval (CI): 95% [${stats.confidenceInterval[0].toFixed(2)}, ${stats.confidenceInterval[1].toFixed(2)}]ms`;
+    : `Confidence Interval (CI): 95% [${formatMs(stats.confidenceInterval[0])}, ${formatMs(stats.confidenceInterval[1])}]ms`;
   const rmeText = stats.relativeMarginOfError === null
     ? 'Relative Margin of Error (RME): N/A'
     : `Relative Margin of Error (RME): ${stats.relativeMarginOfError.toFixed(2)}% [${formatTag(rmeTag!)}]`;
@@ -44,7 +45,7 @@ function buildStatsBlock(durations: number[], expectedDuration?: number, setupTe
   const madTag = classifyMAD(stats.mad, stats.median);
   const madText = stats.mad === null
     ? 'Median Absolute Deviation (MAD): N/A'
-    : `Median Absolute Deviation (MAD): ${stats.mad.toFixed(2)}ms${madTag !== null ? ` [${formatTag(madTag)}]` : ''}`;
+    : `Median Absolute Deviation (MAD): ${formatMs(stats.mad)}ms${madTag !== null ? ` [${formatTag(madTag)}]` : ''}`;
 
   const lines = [
     `Statistics (n=${stats.n}${setupTeardownActive ? ', setup/teardown active' : ''}): mean=${fmt(stats.mean)}ms, median=${fmt(stats.median)}ms, stddev=${fmt(stats.stddev)}ms`,
@@ -310,10 +311,10 @@ describe("Test jest expect.toCompleteWithinQuantile assertion", () => {
     }
 
     // THEN the distribution line should contain the correct percentile values
-    const p25 = metrics.calcQuantile(25, durations).toFixed(2);
-    const p50 = metrics.calcQuantile(50, durations).toFixed(2);
-    const p75 = metrics.calcQuantile(75, durations).toFixed(2);
-    const p90 = metrics.calcQuantile(90, durations).toFixed(2);
+    const p25 = formatMs(metrics.calcQuantile(25, durations));
+    const p50 = formatMs(metrics.calcQuantile(50, durations));
+    const p75 = formatMs(metrics.calcQuantile(75, durations));
+    const p90 = formatMs(metrics.calcQuantile(90, durations));
     expect(errorMessage).toContain(`P25=${p25}ms`);
     expect(errorMessage).toContain(`P50=${p50}ms`);
     expect(errorMessage).toContain(`P75=${p75}ms`);
@@ -2015,7 +2016,7 @@ describe("Benchmark log interpretability annotations", () => {
     }
 
     // THEN the interpretation notes the CI upper bound exceeds the budget
-    const expectedUpperBound = givenCIUpper.toFixed(2);
+    const expectedUpperBound = formatMs(givenCIUpper);
     expect(actualMessage).toContain(`CI upper bound (${expectedUpperBound}ms) exceeds your ${givenThreshold}ms threshold`);
     expect(actualMessage).toContain('consider optimizing the code or raising the threshold');
   });
