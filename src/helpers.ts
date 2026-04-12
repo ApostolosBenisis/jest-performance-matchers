@@ -9,6 +9,7 @@ import {
   generateInterpretation,
   generateComparisonInterpretation,
   generateThroughputInterpretation,
+  hasWarningConditions,
   formatTag,
   formatPValue,
 } from "./diagnostics";
@@ -19,6 +20,22 @@ export interface ErrorInfo {
   errorCount: number;
   totalIterations: number;
   allowedRate: number;
+}
+
+export type LogDiagnostics = 'INFO' | 'WARN' | 'FAIL';
+
+const LOG_PREFIX = '[jest-performance-matchers]';
+
+export function logDiagnosticsIfNeeded(pass: boolean, statsBlock: string, logLevel: LogDiagnostics, warnings: boolean): void {
+  if (!pass) return;
+  if (logLevel === 'FAIL') return;
+  if (logLevel === 'INFO') {
+    console.info(`${LOG_PREFIX} Diagnostics:\n${statsBlock}`);
+    return;
+  }
+  if (warnings) {
+    console.warn(`${LOG_PREFIX} Diagnostics (warnings detected):\n${statsBlock}`);
+  }
 }
 
 export function formatStatValue(value: number | null): string {
@@ -89,6 +106,7 @@ export interface QuantileResultsOptions {
   errorCount: number; allowedErrorRate: number;
   expectedDurationInMilliseconds: number;
   setupTeardownActive: boolean; removeOutliersEnabled: boolean;
+  logDiagnostics: LogDiagnostics;
 }
 
 export function processQuantileResults(opts: QuantileResultsOptions): { message: () => string; pass: boolean } {
@@ -121,14 +139,17 @@ export function processQuantileResults(opts: QuantileResultsOptions): { message:
     totalIterations: count,
     allowedRate: allowedErrorRate
   } : undefined;
-  return assertDurationQuantile(count, quantile, quantileValue, effectiveDurations, expectedDurationInMilliseconds, setupTeardownActive, errorInfo);
+  return assertDurationQuantile(count, quantile, quantileValue, effectiveDurations, expectedDurationInMilliseconds, setupTeardownActive, errorInfo, opts.logDiagnostics);
 }
 
-export function assertDurationQuantile(iterations: number, quantile: number, quantileValue: number, durations: number[], expectedDurationInMilliseconds: number, setupTeardownActive?: boolean, errorInfo?: ErrorInfo) {
+export function assertDurationQuantile(iterations: number, quantile: number, quantileValue: number, durations: number[], expectedDurationInMilliseconds: number, setupTeardownActive: boolean | undefined, errorInfo: ErrorInfo | undefined, logDiagnostics: LogDiagnostics) {
   const stats = calcStats(durations);
   const statsBlock = formatStatsBlock(stats, durations, expectedDurationInMilliseconds, setupTeardownActive, errorInfo);
+  const pass = quantileValue <= expectedDurationInMilliseconds;
 
-  if (quantileValue <= expectedDurationInMilliseconds) {
+  logDiagnosticsIfNeeded(pass, statsBlock, logDiagnostics, hasWarningConditions(stats, expectedDurationInMilliseconds, errorInfo));
+
+  if (pass) {
     return {
       message: () =>
         `expected that ${quantile}% of the time when running ${iterations} iterations,\nthe function duration to be greater than ${printExpected(expectedDurationInMilliseconds)} (ms),\ninstead it was ${printReceived(quantileValue)} (ms)\n\n${statsBlock}`,
@@ -211,6 +232,7 @@ export interface ComparativeResultsOptions {
   errorCountA: number; errorCountB: number;
   allowedErrorRate: number; confidence: number;
   setupTeardownActive: boolean; removeOutliersEnabled: boolean;
+  logDiagnostics: LogDiagnostics;
 }
 
 export function processComparativeResults(opts: ComparativeResultsOptions): { message: () => string; pass: boolean } {
@@ -264,6 +286,9 @@ export function processComparativeResults(opts: ComparativeResultsOptions): { me
 
   const statsBlock = formatComparativeStatsBlock({statsA, statsB, durationsA: effectiveA, durationsB: effectiveB, tTest, confidence, setupTeardownActive, errorInfoA, errorInfoB});
 
+  const warnings = hasWarningConditions(statsA, undefined, errorInfoA) || hasWarningConditions(statsB, undefined, errorInfoB);
+  logDiagnosticsIfNeeded(pass, statsBlock, opts.logDiagnostics, warnings);
+
   if (pass) {
     return {
       pass: true,
@@ -285,6 +310,7 @@ export interface ThroughputResultsOptions {
   duration: number;
   setupTeardownActive: boolean;
   removeOutliersEnabled: boolean;
+  logDiagnostics: LogDiagnostics;
 }
 
 export function processThroughputResults(opts: ThroughputResultsOptions): { message: () => string; pass: boolean } {
@@ -323,6 +349,8 @@ export function processThroughputResults(opts: ThroughputResultsOptions): { mess
 
   const errorInfo: ErrorInfo | undefined = errorCount > 0 ? {errorCount, totalIterations: totalOps, allowedRate: allowedErrorRate} : undefined;
   const statsBlock = formatThroughputStatsBlock({stats, durations: effectiveDurations, actualOpsPerSecond, expectedOpsPerSecond, duration, totalOps: durations.length, setupTeardownActive, errorInfo});
+
+  logDiagnosticsIfNeeded(pass, statsBlock, opts.logDiagnostics, hasWarningConditions(stats, undefined, errorInfo));
 
   if (pass) {
     return {

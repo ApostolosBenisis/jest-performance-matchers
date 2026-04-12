@@ -629,7 +629,7 @@ describe("toBeFasterThan", () => {
       const actualResult = processComparativeResults({
         durationsA: givenFunctionADurations, durationsB: givenFunctionBDurations,
         count: 10, errorCountA: 2, errorCountB: 0,
-        allowedErrorRate: 0.3, confidence: 0.95, setupTeardownActive: false, removeOutliersEnabled: false,
+        allowedErrorRate: 0.3, confidence: 0.95, setupTeardownActive: false, removeOutliersEnabled: false, logDiagnostics: 'FAIL',
       });
       const actualMessage = actualResult.message();
 
@@ -1033,7 +1033,7 @@ describe("processComparativeResults (unit tests)", () => {
     // WHEN processing comparative results with allowedErrorRate=0.1,
     const actualResult = processComparativeResults({
       durationsA: givenFunctionADurations, durationsB: givenFunctionBDurations, count: 5,
-      errorCountA: 3, errorCountB: 0, allowedErrorRate: 0.1, confidence: 0.95, setupTeardownActive: false, removeOutliersEnabled: false,
+      errorCountA: 3, errorCountB: 0, allowedErrorRate: 0.1, confidence: 0.95, setupTeardownActive: false, removeOutliersEnabled: false, logDiagnostics: 'FAIL',
     });
 
     // THEN the result fails with an error rate exceeded message for Function A
@@ -1049,7 +1049,7 @@ describe("processComparativeResults (unit tests)", () => {
     // WHEN processing comparative results with allowedErrorRate=0.1,
     const actualResult = processComparativeResults({
       durationsA: givenFunctionADurations, durationsB: givenFunctionBDurations, count: 5,
-      errorCountA: 0, errorCountB: 3, allowedErrorRate: 0.1, confidence: 0.95, setupTeardownActive: false, removeOutliersEnabled: false,
+      errorCountA: 0, errorCountB: 3, allowedErrorRate: 0.1, confidence: 0.95, setupTeardownActive: false, removeOutliersEnabled: false, logDiagnostics: 'FAIL',
     });
 
     // THEN the result fails with an error rate exceeded message for Function B
@@ -1065,7 +1065,7 @@ describe("processComparativeResults (unit tests)", () => {
     // WHEN processing comparative results,
     const actualResult = processComparativeResults({
       durationsA: givenFunctionADurations, durationsB: givenFunctionBDurations, count: 5,
-      errorCountA: 0, errorCountB: 0, allowedErrorRate: 0, confidence: 0.95, setupTeardownActive: false, removeOutliersEnabled: false,
+      errorCountA: 0, errorCountB: 0, allowedErrorRate: 0, confidence: 0.95, setupTeardownActive: false, removeOutliersEnabled: false, logDiagnostics: 'FAIL',
     });
 
     // THEN the result fails with an insufficient data message for Function A
@@ -1081,7 +1081,7 @@ describe("processComparativeResults (unit tests)", () => {
     // WHEN processing comparative results,
     const actualResult = processComparativeResults({
       durationsA: givenFunctionADurations, durationsB: givenFunctionBDurations, count: 5,
-      errorCountA: 0, errorCountB: 0, allowedErrorRate: 0, confidence: 0.95, setupTeardownActive: false, removeOutliersEnabled: false,
+      errorCountA: 0, errorCountB: 0, allowedErrorRate: 0, confidence: 0.95, setupTeardownActive: false, removeOutliersEnabled: false, logDiagnostics: 'FAIL',
     });
 
     // THEN the result fails with an insufficient data message for Function B
@@ -1096,7 +1096,7 @@ describe("processComparativeResults (unit tests)", () => {
     // WHEN processing comparative results,
     const actualResult = processComparativeResults({
       durationsA: givenData, durationsB: [...givenData], count: 5,
-      errorCountA: 0, errorCountB: 0, allowedErrorRate: 0, confidence: 0.95, setupTeardownActive: false, removeOutliersEnabled: false,
+      errorCountA: 0, errorCountB: 0, allowedErrorRate: 0, confidence: 0.95, setupTeardownActive: false, removeOutliersEnabled: false, logDiagnostics: 'FAIL',
     });
 
     // THEN the result is not pass because there is no significant difference
@@ -1113,7 +1113,7 @@ describe("processComparativeResults (unit tests)", () => {
     // WHEN processing comparative results with zero means,
     const actualResult = processComparativeResults({
       durationsA: givenFunctionADurations, durationsB: givenFunctionBDurations, count: 5,
-      errorCountA: 0, errorCountB: 0, allowedErrorRate: 0, confidence: 0.95, setupTeardownActive: false, removeOutliersEnabled: false,
+      errorCountA: 0, errorCountB: 0, allowedErrorRate: 0, confidence: 0.95, setupTeardownActive: false, removeOutliersEnabled: false, logDiagnostics: 'FAIL',
     });
     const actualMessage = actualResult.message();
 
@@ -1130,7 +1130,7 @@ describe("processComparativeResults (unit tests)", () => {
     // WHEN processing comparative results with setupTeardownActive=true,
     const actualResult = processComparativeResults({
       durationsA: givenFunctionADurations, durationsB: givenFunctionBDurations, count: 5,
-      errorCountA: 0, errorCountB: 0, allowedErrorRate: 0, confidence: 0.95, setupTeardownActive: true, removeOutliersEnabled: false,
+      errorCountA: 0, errorCountB: 0, allowedErrorRate: 0, confidence: 0.95, setupTeardownActive: true, removeOutliersEnabled: false, logDiagnostics: 'FAIL',
     });
 
     // THEN the message contains the setup/teardown active hint
@@ -1145,7 +1145,7 @@ describe("processComparativeResults (unit tests)", () => {
     // WHEN processing comparative results with errors within tolerance,
     const actualResult = processComparativeResults({
       durationsA: givenFunctionADurations, durationsB: givenFunctionBDurations, count: 5,
-      errorCountA: 1, errorCountB: 0, allowedErrorRate: 0.5, confidence: 0.95, setupTeardownActive: false, removeOutliersEnabled: false,
+      errorCountA: 1, errorCountB: 0, allowedErrorRate: 0.5, confidence: 0.95, setupTeardownActive: false, removeOutliersEnabled: false, logDiagnostics: 'FAIL',
     });
     const actualMessage = actualResult.message();
 
@@ -1162,12 +1162,143 @@ describe("processComparativeResults (unit tests)", () => {
     // WHEN processing comparative results,
     const actualResult = processComparativeResults({
       durationsA: givenFunctionADurations, durationsB: givenFunctionBDurations, count: 5,
-      errorCountA: 0, errorCountB: 0, allowedErrorRate: 0, confidence: 0.95, setupTeardownActive: false, removeOutliersEnabled: false,
+      errorCountA: 0, errorCountB: 0, allowedErrorRate: 0, confidence: 0.95, setupTeardownActive: false, removeOutliersEnabled: false, logDiagnostics: 'FAIL',
     });
 
     // THEN pass is true because Function A is statistically significantly faster
     expect(actualResult.pass).toBe(true);
     // AND the negated message indicates Function A is faster (used when .not is applied)
     expect(actualResult.message()).toContain('expected Function A NOT to be faster than Function B');
+  });
+});
+
+describe("logDiagnostics option (toBeFasterThan)", () => {
+  beforeEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  test("should log via console.info on passing test when logDiagnostics is 'INFO'", () => {
+    // GIVEN Function A faster than Function B
+    const givenADurations = [5, 5, 5, 5, 5];
+    const givenBDurations = [15, 15, 15, 15, 15];
+    mockFunctionProcessTimesInterleaved(givenADurations, givenBDurations);
+    const infoSpy = jest.spyOn(console, 'info').mockImplementation();
+
+    // WHEN asserting with logDiagnostics: 'INFO'
+    expect(() => undefined).toBeFasterThan(() => undefined, {
+      iterations: 5, logDiagnostics: 'INFO',
+    });
+
+    // THEN console.info is called with the diagnostics block
+    expect(infoSpy).toHaveBeenCalledTimes(1);
+    expect(infoSpy.mock.calls[0][0]).toContain('[jest-performance-matchers] Diagnostics:');
+  });
+
+  test("should log via console.warn on passing test with warnings (WARN level)", () => {
+    // GIVEN Function A faster than Function B with only 2 iterations (POOR sample)
+    const givenADurations = [5, 5];
+    const givenBDurations = [15, 15];
+    mockFunctionProcessTimesInterleaved(givenADurations, givenBDurations);
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation();
+
+    // WHEN asserting with default logDiagnostics (WARN)
+    expect(() => undefined).toBeFasterThan(() => undefined, {iterations: 2});
+
+    // THEN console.warn is called because n=2 triggers POOR sample adequacy
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy.mock.calls[0][0]).toContain('[jest-performance-matchers] Diagnostics (warnings detected):');
+  });
+
+  test("should not log on passing test when logDiagnostics is 'FAIL'", () => {
+    // GIVEN Function A faster than Function B with small sample
+    const givenADurations = [5, 5];
+    const givenBDurations = [15, 15];
+    mockFunctionProcessTimesInterleaved(givenADurations, givenBDurations);
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation();
+    const infoSpy = jest.spyOn(console, 'info').mockImplementation();
+
+    // WHEN asserting with logDiagnostics: 'FAIL'
+    expect(() => undefined).toBeFasterThan(() => undefined, {
+      iterations: 2, logDiagnostics: 'FAIL',
+    });
+
+    // THEN no console output
+    expect(warnSpy).not.toHaveBeenCalled();
+    expect(infoSpy).not.toHaveBeenCalled();
+  });
+
+  test("should not log on passing test when logDiagnostics is 'WARN' and no warnings", () => {
+    // GIVEN Function A faster than Function B with large, consistent sample (no warning conditions)
+    const givenADurations = Array(31).fill(5);
+    const givenBDurations = Array(31).fill(15);
+    mockFunctionProcessTimesInterleaved(givenADurations, givenBDurations);
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation();
+    const infoSpy = jest.spyOn(console, 'info').mockImplementation();
+
+    // WHEN asserting with default logDiagnostics (WARN)
+    expect(() => undefined).toBeFasterThan(() => undefined, {iterations: 31});
+
+    // THEN no console output (no warning conditions on either side)
+    expect(warnSpy).not.toHaveBeenCalled();
+    expect(infoSpy).not.toHaveBeenCalled();
+  });
+
+  test("should not log on failing test regardless of logDiagnostics level", () => {
+    // GIVEN Function A NOT faster than Function B (same speed)
+    const givenADurations = [10, 10, 10, 10, 10];
+    const givenBDurations = [10, 10, 10, 10, 10];
+    mockFunctionProcessTimesInterleaved(givenADurations, givenBDurations);
+    const infoSpy = jest.spyOn(console, 'info').mockImplementation();
+
+    // WHEN asserting with logDiagnostics: 'INFO'
+    expect(() => {
+      expect(() => undefined).toBeFasterThan(() => undefined, {
+        iterations: 5, logDiagnostics: 'INFO',
+      });
+    }).toThrow();
+
+    // THEN no console output
+    expect(infoSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("logDiagnostics option (toResolveFasterThan)", () => {
+  beforeEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  test("should log via console.info on passing async test when logDiagnostics is 'INFO'", async () => {
+    // GIVEN async Function A faster than Function B
+    const givenADurations = [5, 5, 5, 5, 5];
+    const givenBDurations = [15, 15, 15, 15, 15];
+    mockFunctionProcessTimesInterleaved(givenADurations, givenBDurations);
+    const infoSpy = jest.spyOn(console, 'info').mockImplementation();
+
+    // WHEN asserting with logDiagnostics: 'INFO'
+    await expect(async () => undefined).toResolveFasterThan(async () => undefined, {
+      iterations: 5, logDiagnostics: 'INFO',
+    });
+
+    // THEN console.info is called
+    expect(infoSpy).toHaveBeenCalledTimes(1);
+    expect(infoSpy.mock.calls[0][0]).toContain('[jest-performance-matchers] Diagnostics:');
+  });
+
+  test("should not log on failing async test with logDiagnostics 'INFO'", async () => {
+    // GIVEN async functions with same speed (no significant difference)
+    const givenADurations = [10, 10, 10, 10, 10];
+    const givenBDurations = [10, 10, 10, 10, 10];
+    mockFunctionProcessTimesInterleaved(givenADurations, givenBDurations);
+    const infoSpy = jest.spyOn(console, 'info').mockImplementation();
+
+    // WHEN asserting with logDiagnostics: 'INFO'
+    await expect(
+      expect(async () => undefined).toResolveFasterThan(async () => undefined, {
+        iterations: 5, logDiagnostics: 'INFO',
+      })
+    ).rejects.toThrow();
+
+    // THEN no console output
+    expect(infoSpy).not.toHaveBeenCalled();
   });
 });

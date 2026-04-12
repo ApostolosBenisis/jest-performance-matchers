@@ -297,6 +297,21 @@ describe("Input validation", () => {
         });
       }).toThrowError(`jest-performance-matchers: allowedErrorRate must be a number between 0 and 1, received ${givenAllowedErrorRate}`);
     });
+
+    test("should throw a validation error when logDiagnostics is an invalid value", () => {
+      // GIVEN an invalid logDiagnostics value
+      const givenLogDiagnostics = 'DEBUG';
+
+      // WHEN asserting with the invalid value,
+      // THEN a descriptive error is thrown
+      expect(() => {
+        expect(() => undefined).toCompleteWithinQuantile(10, {
+          iterations: 5,
+          quantile: 95,
+          logDiagnostics: givenLogDiagnostics as 'INFO',
+        });
+      }).toThrowError(`jest-performance-matchers: logDiagnostics must be 'INFO', 'WARN', or 'FAIL', received '${givenLogDiagnostics}'`);
+    });
   });
 
   describe("toResolveWithinQuantile", () => {
@@ -418,6 +433,21 @@ describe("Input validation", () => {
           allowedErrorRate: givenAllowedErrorRate
         });
       }).rejects.toThrowError(`jest-performance-matchers: allowedErrorRate must be a number between 0 and 1, received ${givenAllowedErrorRate}`);
+    });
+
+    test("should throw a validation error when logDiagnostics is an invalid value", async () => {
+      // GIVEN an invalid logDiagnostics value
+      const givenLogDiagnostics = 'VERBOSE';
+
+      // WHEN asserting with the invalid value,
+      // THEN a descriptive error is thrown
+      await expect(async () => {
+        await expect(async () => Promise.resolve()).toResolveWithinQuantile(10, {
+          iterations: 5,
+          quantile: 95,
+          logDiagnostics: givenLogDiagnostics as 'INFO',
+        });
+      }).rejects.toThrowError(`jest-performance-matchers: logDiagnostics must be 'INFO', 'WARN', or 'FAIL', received '${givenLogDiagnostics}'`);
     });
   });
 
@@ -642,6 +672,19 @@ describe("Input validation", () => {
       expect(() => {
         expect(() => undefined).toBeFasterThan(() => undefined, {iterations: 5, allowedErrorRate: givenAllowedErrorRate});
       }).toThrowError(`jest-performance-matchers: allowedErrorRate must be a number between 0 and 1, received ${givenAllowedErrorRate}`);
+    });
+
+    test("should throw an error when logDiagnostics is an invalid value", () => {
+      // GIVEN an invalid logDiagnostics value
+      const givenLogDiagnostics = 'TRACE';
+
+      // WHEN asserting toBeFasterThan
+      // THEN expect a descriptive error
+      expect(() => {
+        expect(() => undefined).toBeFasterThan(() => undefined, {
+          iterations: 5, logDiagnostics: givenLogDiagnostics as 'INFO',
+        });
+      }).toThrowError(`jest-performance-matchers: logDiagnostics must be 'INFO', 'WARN', or 'FAIL', received '${givenLogDiagnostics}'`);
     });
 
     test("should throw an error when setup is not a function", () => {
@@ -906,6 +949,19 @@ describe("Input validation", () => {
       }).rejects.toThrowError(`jest-performance-matchers: allowedErrorRate must be a number between 0 and 1, received ${givenAllowedErrorRate}`);
     });
 
+    test("should throw an error when logDiagnostics is an invalid value", async () => {
+      // GIVEN an invalid logDiagnostics value
+      const givenLogDiagnostics = 'TRACE';
+
+      // WHEN asserting toResolveFasterThan
+      // THEN expect a descriptive error
+      await expect(async () => {
+        await expect(async () => Promise.resolve()).toResolveFasterThan(async () => Promise.resolve(), {
+          iterations: 5, logDiagnostics: givenLogDiagnostics as 'INFO',
+        });
+      }).rejects.toThrowError(`jest-performance-matchers: logDiagnostics must be 'INFO', 'WARN', or 'FAIL', received '${givenLogDiagnostics}'`);
+    });
+
     test("should throw an error when setup is not a function", async () => {
       // GIVEN a non-function setup
       const givenSetup = "foo-not-a-function";
@@ -976,6 +1032,36 @@ describe("Input validation", () => {
         // @ts-expect-error - intentionally passing invalid options for testing
         await expect(async () => Promise.resolve()).toResolveFasterThan(async () => Promise.resolve(), givenOptions);
       }).rejects.toThrowError("jest-performance-matchers: options must be an object with iterations");
+    });
+  });
+
+  describe("toAchieveOpsPerSecond", () => {
+    test("should throw an error when logDiagnostics is an invalid value", () => {
+      // GIVEN an invalid logDiagnostics value
+      const givenLogDiagnostics = 'TRACE';
+
+      // WHEN asserting toAchieveOpsPerSecond
+      // THEN expect a descriptive error
+      expect(() => {
+        expect(() => undefined).toAchieveOpsPerSecond(100, {
+          duration: 1000, logDiagnostics: givenLogDiagnostics as 'INFO',
+        });
+      }).toThrowError(`jest-performance-matchers: logDiagnostics must be 'INFO', 'WARN', or 'FAIL', received '${givenLogDiagnostics}'`);
+    });
+  });
+
+  describe("toResolveAtOpsPerSecond", () => {
+    test("should throw an error when logDiagnostics is an invalid value", async () => {
+      // GIVEN an invalid logDiagnostics value
+      const givenLogDiagnostics = 'TRACE';
+
+      // WHEN asserting toResolveAtOpsPerSecond
+      // THEN expect a descriptive error
+      await expect(async () => {
+        await expect(async () => Promise.resolve()).toResolveAtOpsPerSecond(100, {
+          duration: 1000, logDiagnostics: givenLogDiagnostics as 'INFO',
+        });
+      }).rejects.toThrowError(`jest-performance-matchers: logDiagnostics must be 'INFO', 'WARN', or 'FAIL', received '${givenLogDiagnostics}'`);
     });
   });
 });

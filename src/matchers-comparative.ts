@@ -23,6 +23,7 @@ export function toBeFasterThan(callbackA: SyncCallback, callbackB: SyncCallback,
   setupEach?: (suiteState: unknown) => unknown,
   teardownEach?: (suiteState: unknown, iterState: unknown) => void,
   allowedErrorRate?: number,
+  logDiagnostics?: 'INFO' | 'WARN' | 'FAIL',
 }) {
   validateCallback(callbackA);
   validateCallback(callbackB);
@@ -32,6 +33,7 @@ export function toBeFasterThan(callbackA: SyncCallback, callbackB: SyncCallback,
   const confidence = options.confidence ?? 0.95;
   const hooks: SyncHooks = options;
   const allowedErrorRate = options.allowedErrorRate ?? 0;
+  const logDiagnostics = options.logDiagnostics ?? 'WARN';
   const suiteState = hooks.setup ? hooks.setup() : undefined;
 
   try {
@@ -52,6 +54,7 @@ export function toBeFasterThan(callbackA: SyncCallback, callbackB: SyncCallback,
       durationsA, durationsB, count, errorCountA, errorCountB,
       allowedErrorRate, confidence, setupTeardownActive,
       removeOutliersEnabled: options.outliers === 'remove',
+      logDiagnostics,
     });
   } finally {
     if (hooks.teardown) hooks.teardown(suiteState);
@@ -79,6 +82,7 @@ export async function toResolveFasterThan(promiseA: AsyncCallback, promiseB: Asy
   setupEach?: (suiteState: unknown) => unknown,
   teardownEach?: (suiteState: unknown, iterState: unknown) => void | Promise<void>,
   allowedErrorRate?: number,
+  logDiagnostics?: 'INFO' | 'WARN' | 'FAIL',
 }) {
   validateCallback(promiseA);
   validateCallback(promiseB);
@@ -88,6 +92,7 @@ export async function toResolveFasterThan(promiseA: AsyncCallback, promiseB: Asy
   const confidence = options.confidence ?? 0.95;
   const hooks: AsyncHooks = options;
   const allowedErrorRate = options.allowedErrorRate ?? 0;
+  const logDiagnostics = options.logDiagnostics ?? 'WARN';
   const suiteState = hooks.setup ? await hooks.setup() : undefined;
 
   try {
@@ -108,6 +113,7 @@ export async function toResolveFasterThan(promiseA: AsyncCallback, promiseB: Asy
       durationsA, durationsB, count, errorCountA, errorCountB,
       allowedErrorRate, confidence, setupTeardownActive,
       removeOutliersEnabled: options.outliers === 'remove',
+      logDiagnostics,
     });
   } finally {
     if (hooks.teardown) await hooks.teardown(suiteState);

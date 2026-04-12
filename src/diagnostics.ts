@@ -310,6 +310,36 @@ export function generateThroughputInterpretation(
   return message;
 }
 
+/**
+ * Check whether any warning condition is present that warrants diagnostic output on a passing test.
+ *
+ * Conditions checked:
+ * 1. Sample adequacy is POOR (n < 10) — also covers "errors reduced effective n below threshold"
+ *    since `stats.n` reflects successful iterations only after error exclusion
+ * 2. RME is POOR (> 30%)
+ * 3. CV is POOR (> 0.3) — also covers "outliers inflating variance" since POOR CV always triggers
+ *    regardless of MAD; the MAD-based hint about outliers appears in the interpretation text
+ * 4. CI upper bound exceeds the user's threshold (budget overrun risk)
+ * 5. Non-zero error rate — some iterations were excluded
+ */
+export function hasWarningConditions(
+  stats: Stats,
+  expectedDuration?: number,
+  errorInfo?: { errorCount: number; totalIterations: number; allowedRate: number },
+): boolean {
+  if (classifySampleAdequacy(stats.n).label === 'POOR') return true;
+
+  const rme = classifyRME(stats.relativeMarginOfError);
+  if (rme !== null && rme.label === 'POOR') return true;
+
+  const cv = classifyCV(stats.coefficientOfVariation);
+  if (cv !== null && cv.label === 'POOR') return true;
+
+  if (expectedDuration !== undefined && stats.confidenceInterval !== null && stats.confidenceInterval[1] > expectedDuration) return true;
+
+  return errorInfo !== undefined && errorInfo.errorCount > 0;
+}
+
 function interpretThroughputAbove(rme: Tag, cv: Tag, mad: Tag | null, pctOfTarget: number): string {
   const surplus = pctOfTarget > 100 ? ` (${(pctOfTarget - 100).toFixed(1)}% above target)` : '';
   if (cv.label === 'POOR') {

@@ -33,6 +33,7 @@ declare global {
         setupEach?: (suiteState: T) => U,
         teardownEach?: (suiteState: T, iterState: U) => void,
         allowedErrorRate?: number,
+        logDiagnostics?: 'INFO' | 'WARN' | 'FAIL',
       }): R;
 
       toResolveWithin<T = void>(expectedDurationInMilliseconds: number, options?: {
@@ -50,6 +51,7 @@ declare global {
         setupEach?: (suiteState: T) => U | Promise<U>,
         teardownEach?: (suiteState: T, iterState: U) => void | Promise<void>,
         allowedErrorRate?: number,
+        logDiagnostics?: 'INFO' | 'WARN' | 'FAIL',
       }): Promise<R>;
 
       toBeFasterThan<T = void, U = void>(comparisonFn: (...args: unknown[]) => unknown, options: {
@@ -62,6 +64,7 @@ declare global {
         setupEach?: (suiteState: T) => U,
         teardownEach?: (suiteState: T, iterState: U) => void,
         allowedErrorRate?: number,
+        logDiagnostics?: 'INFO' | 'WARN' | 'FAIL',
       }): R;
 
       toResolveFasterThan<T = void, U = void>(comparisonFn: (...args: unknown[]) => Promise<unknown>, options: {
@@ -74,6 +77,7 @@ declare global {
         setupEach?: (suiteState: T) => U | Promise<U>,
         teardownEach?: (suiteState: T, iterState: U) => void | Promise<void>,
         allowedErrorRate?: number,
+        logDiagnostics?: 'INFO' | 'WARN' | 'FAIL',
       }): Promise<R>;
 
       toAchieveOpsPerSecond<T = void, U = void>(expectedOpsPerSecond: number, options: {
@@ -85,6 +89,7 @@ declare global {
         setupEach?: (suiteState: T) => U,
         teardownEach?: (suiteState: T, iterState: U) => void,
         allowedErrorRate?: number,
+        logDiagnostics?: 'INFO' | 'WARN' | 'FAIL',
       }): R;
 
       toResolveAtOpsPerSecond<T = void, U = void>(expectedOpsPerSecond: number, options: {
@@ -96,6 +101,7 @@ declare global {
         setupEach?: (suiteState: T) => U | Promise<U>,
         teardownEach?: (suiteState: T, iterState: U) => void | Promise<void>,
         allowedErrorRate?: number,
+        logDiagnostics?: 'INFO' | 'WARN' | 'FAIL',
       }): Promise<R>;
     }
   }

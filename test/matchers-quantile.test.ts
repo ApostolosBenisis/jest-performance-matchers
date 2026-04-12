@@ -2365,3 +2365,173 @@ describe("Test jest expect.toResolveWithinQuantile assertion", () => {
   });
 });
 
+describe("logDiagnostics option (sync)", () => {
+  beforeEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  test("should log via console.info on passing test when logDiagnostics is 'INFO'", () => {
+    // GIVEN a function that passes and logDiagnostics is INFO
+    const givenDuration = 10;
+    const givenIterations = 5;
+    mockFunctionProcessTimes(Array(givenIterations).fill(givenDuration));
+    const infoSpy = jest.spyOn(console, 'info').mockImplementation();
+
+    // WHEN asserting with logDiagnostics: 'INFO'
+    expect(() => undefined).toCompleteWithinQuantile(givenDuration, {
+      iterations: givenIterations, quantile: 100, logDiagnostics: 'INFO',
+    });
+
+    // THEN console.info is called with the diagnostics block
+    expect(infoSpy).toHaveBeenCalledTimes(1);
+    expect(infoSpy.mock.calls[0][0]).toContain('[jest-performance-matchers] Diagnostics:');
+    expect(infoSpy.mock.calls[0][0]).toContain('Statistics');
+  });
+
+  test("should log via console.warn on passing test when logDiagnostics is 'WARN' and warnings detected", () => {
+    // GIVEN a function that passes with small sample (POOR sample adequacy)
+    const givenDuration = 10;
+    const givenIterations = 3;
+    mockFunctionProcessTimes(Array(givenIterations).fill(givenDuration));
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation();
+
+    // WHEN asserting with logDiagnostics: 'WARN' (n=3 triggers POOR sample adequacy)
+    expect(() => undefined).toCompleteWithinQuantile(givenDuration, {
+      iterations: givenIterations, quantile: 100, logDiagnostics: 'WARN',
+    });
+
+    // THEN console.warn is called with warnings detected
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy.mock.calls[0][0]).toContain('[jest-performance-matchers] Diagnostics (warnings detected):');
+  });
+
+  test("should not log on passing test when logDiagnostics is 'WARN' and no warnings", () => {
+    // GIVEN a function that passes with good stats (many consistent iterations)
+    const givenDuration = 10;
+    const givenIterations = 31;
+    mockFunctionProcessTimes(Array(givenIterations).fill(givenDuration));
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation();
+    const infoSpy = jest.spyOn(console, 'info').mockImplementation();
+
+    // WHEN asserting with logDiagnostics: 'WARN'
+    expect(() => undefined).toCompleteWithinQuantile(givenDuration, {
+      iterations: givenIterations, quantile: 100, logDiagnostics: 'WARN',
+    });
+
+    // THEN no console output
+    expect(warnSpy).not.toHaveBeenCalled();
+    expect(infoSpy).not.toHaveBeenCalled();
+  });
+
+  test("should not log on passing test when logDiagnostics is 'FAIL'", () => {
+    // GIVEN a function that passes with small sample
+    const givenDuration = 10;
+    const givenIterations = 3;
+    mockFunctionProcessTimes(Array(givenIterations).fill(givenDuration));
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation();
+    const infoSpy = jest.spyOn(console, 'info').mockImplementation();
+
+    // WHEN asserting with logDiagnostics: 'FAIL'
+    expect(() => undefined).toCompleteWithinQuantile(givenDuration, {
+      iterations: givenIterations, quantile: 100, logDiagnostics: 'FAIL',
+    });
+
+    // THEN no console output even though warnings exist
+    expect(warnSpy).not.toHaveBeenCalled();
+    expect(infoSpy).not.toHaveBeenCalled();
+  });
+
+  test("should not log on failing test regardless of logDiagnostics level", () => {
+    // GIVEN a function that exceeds the threshold
+    const givenDuration = 10;
+    const givenIterations = 5;
+    mockFunctionProcessTimes(Array(givenIterations).fill(givenDuration + 5));
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation();
+    const infoSpy = jest.spyOn(console, 'info').mockImplementation();
+
+    // WHEN asserting with logDiagnostics: 'INFO' (strongest output level)
+    expect(() => {
+      expect(() => undefined).toCompleteWithinQuantile(givenDuration, {
+        iterations: givenIterations, quantile: 100, logDiagnostics: 'INFO',
+      });
+    }).toThrow();
+
+    // THEN no console output — diagnostics are in the error message
+    expect(warnSpy).not.toHaveBeenCalled();
+    expect(infoSpy).not.toHaveBeenCalled();
+  });
+
+  test("should default to 'WARN' when logDiagnostics is omitted", () => {
+    // GIVEN a function that passes with small sample (POOR sample adequacy)
+    const givenDuration = 10;
+    const givenIterations = 3;
+    mockFunctionProcessTimes(Array(givenIterations).fill(givenDuration));
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation();
+
+    // WHEN asserting without logDiagnostics option
+    expect(() => undefined).toCompleteWithinQuantile(givenDuration, {
+      iterations: givenIterations, quantile: 100,
+    });
+
+    // THEN console.warn is called (WARN is default, and warnings are present)
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("logDiagnostics option (async)", () => {
+  beforeEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  test("should log via console.info on passing async test when logDiagnostics is 'INFO'", async () => {
+    // GIVEN an async function that passes
+    const givenDuration = 10;
+    const givenIterations = 5;
+    mockFunctionProcessTimes(Array(givenIterations).fill(givenDuration));
+    const infoSpy = jest.spyOn(console, 'info').mockImplementation();
+
+    // WHEN asserting with logDiagnostics: 'INFO'
+    await expect(async () => undefined).toResolveWithinQuantile(givenDuration, {
+      iterations: givenIterations, quantile: 100, logDiagnostics: 'INFO',
+    });
+
+    // THEN console.info is called
+    expect(infoSpy).toHaveBeenCalledTimes(1);
+    expect(infoSpy.mock.calls[0][0]).toContain('[jest-performance-matchers] Diagnostics:');
+  });
+
+  test("should log via console.warn on passing async test with warnings", async () => {
+    // GIVEN an async function that passes with small sample
+    const givenDuration = 10;
+    const givenIterations = 3;
+    mockFunctionProcessTimes(Array(givenIterations).fill(givenDuration));
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation();
+
+    // WHEN asserting with default logDiagnostics (WARN)
+    await expect(async () => undefined).toResolveWithinQuantile(givenDuration, {
+      iterations: givenIterations, quantile: 100,
+    });
+
+    // THEN console.warn is called
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+  });
+
+  test("should not log on failing async test with logDiagnostics 'INFO'", async () => {
+    // GIVEN an async function that exceeds the threshold
+    const givenDuration = 10;
+    const givenIterations = 5;
+    mockFunctionProcessTimes(Array(givenIterations).fill(givenDuration + 5));
+    const infoSpy = jest.spyOn(console, 'info').mockImplementation();
+
+    // WHEN asserting with logDiagnostics: 'INFO'
+    await expect(
+      expect(async () => undefined).toResolveWithinQuantile(givenDuration, {
+        iterations: givenIterations, quantile: 100, logDiagnostics: 'INFO',
+      })
+    ).rejects.toThrow();
+
+    // THEN no console output
+    expect(infoSpy).not.toHaveBeenCalled();
+  });
+});
+
