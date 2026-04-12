@@ -1,31 +1,11 @@
 import {nowInMillis} from "./timing";
 import {validateCallback, validateExpectedOpsPerSecond, validateThroughputOptions} from "./validators";
 import {processThroughputResults} from "./helpers";
-
-interface ThroughputHooks {
-  setup?: () => unknown;
-  teardown?: (suiteState: unknown) => void;
-  setupEach?: (suiteState: unknown) => unknown;
-  teardownEach?: (suiteState: unknown, iterState: unknown) => void;
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- expect.extend erases generics at runtime
-type SyncCallback = (...args: any[]) => unknown;
-
-function warmupSync(callback: SyncCallback, warmupCount: number, suiteState: unknown, hooks: ThroughputHooks): void {
-  for (let i = 0; i < warmupCount; i++) {
-    const iterState = hooks.setupEach ? hooks.setupEach(suiteState) : undefined;
-    try {
-      callback(suiteState, iterState);
-    } finally {
-      if (hooks.teardownEach) hooks.teardownEach(suiteState, iterState);
-    }
-  }
-}
+import {SyncHooks, AsyncHooks, SyncCallback, AsyncCallback, warmupSync, warmupAsync} from "./hooks";
 
 function measureSyncThroughput(
   callback: SyncCallback, duration: number, suiteState: unknown,
-  hooks: ThroughputHooks, allowedErrorRate: number,
+  hooks: SyncHooks, allowedErrorRate: number,
 ): { durations: number[]; errorCount: number } {
   const durations: number[] = [];
   let errorCount = 0;
@@ -67,7 +47,7 @@ export function toAchieveOpsPerSecond(callback: SyncCallback, expectedOpsPerSeco
   validateExpectedOpsPerSecond(expectedOpsPerSecond);
   validateThroughputOptions(options);
 
-  const hooks: ThroughputHooks = options;
+  const hooks: SyncHooks = options;
   const allowedErrorRate = options.allowedErrorRate ?? 0;
   const suiteState = hooks.setup ? hooks.setup() : undefined;
 
@@ -88,30 +68,9 @@ export function toAchieveOpsPerSecond(callback: SyncCallback, expectedOpsPerSeco
   }
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- expect.extend erases generics at runtime
-type AsyncCallback = (...args: any[]) => Promise<unknown>;
-
-interface AsyncThroughputHooks {
-  setup?: () => unknown;
-  teardown?: (suiteState: unknown) => void | Promise<void>;
-  setupEach?: (suiteState: unknown) => unknown;
-  teardownEach?: (suiteState: unknown, iterState: unknown) => void | Promise<void>;
-}
-
-async function warmupAsync(callback: AsyncCallback, warmupCount: number, suiteState: unknown, hooks: AsyncThroughputHooks): Promise<void> {
-  for (let i = 0; i < warmupCount; i++) {
-    const iterState = hooks.setupEach ? await hooks.setupEach(suiteState) : undefined;
-    try {
-      await callback(suiteState, iterState);
-    } finally {
-      if (hooks.teardownEach) await hooks.teardownEach(suiteState, iterState);
-    }
-  }
-}
-
 async function measureAsyncThroughput(
   callback: AsyncCallback, duration: number, suiteState: unknown,
-  hooks: AsyncThroughputHooks, allowedErrorRate: number,
+  hooks: AsyncHooks, allowedErrorRate: number,
 ): Promise<{ durations: number[]; errorCount: number }> {
   const durations: number[] = [];
   let errorCount = 0;
@@ -153,7 +112,7 @@ export async function toResolveAtOpsPerSecond(callback: AsyncCallback, expectedO
   validateExpectedOpsPerSecond(expectedOpsPerSecond);
   validateThroughputOptions(options);
 
-  const hooks: AsyncThroughputHooks = options;
+  const hooks: AsyncHooks = options;
   const allowedErrorRate = options.allowedErrorRate ?? 0;
   const suiteState = hooks.setup ? await hooks.setup() : undefined;
 
