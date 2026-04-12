@@ -13,7 +13,7 @@
    Assert · Measure · Prove
 ```
 
-Jest matchers for **statistically reliable** performance testing in Node.js. Measure code execution time over multiple iterations, assert on quantiles, **compare two functions via Welch's t-test**, and catch performance regressions in CI — all with zero dependencies.
+Jest matchers for **statistically reliable** performance testing in Node.js. Measure code execution time over multiple iterations, assert on quantiles, **compare two functions via Welch's t-test**, **assert throughput in ops/sec**, and catch performance regressions in CI — all with zero dependencies.
 
 ```ts
 // Ensure your API handler stays fast — P95 under 50ms across 100 runs
@@ -24,6 +24,10 @@ await expect(async () => {
 // Prove your optimized sort is statistically faster than the baseline
 expect(() => quicksort(data))
     .toBeFasterThan(() => bubblesort(data), { iterations: 100, warmup: 5 });
+
+// Assert your parser sustains at least 10,000 ops/sec over a 1-second window
+expect(() => parseJSON(payload))
+    .toAchieveOpsPerSecond(10000, { duration: 1000, warmup: 100 });
 ```
 
 ## What is this for?
@@ -34,6 +38,7 @@ Use `jest-performance-matchers` when you need to:
 - **Detect performance regressions** — catch slowdowns before they reach production
 - **Validate with statistical confidence** — assert on percentiles (P90, P95, P99), not single flaky runs
 - **Compare implementations** — prove one algorithm is statistically faster than another using Welch's t-test
+- **Assert throughput** — verify a function sustains a minimum ops/sec rate over a time window
 
 If you already have Jest tests, adding performance assertions takes one import and one line of code.
 
@@ -46,6 +51,7 @@ If you already have Jest tests, adding performance assertions takes one import a
 | **Outliers** | One GC pause fails the test | IQR-based outlier removal |
 | **Diagnostics** | You get a number | Mean, median, CI, percentiles, shape, sparklines, and actionable guidance |
 | **Comparison** | Run both, compare means, hope for the best | Welch's t-test with p-values, confidence intervals, and effect size |
+| **Throughput** | DIY loop with a timer | Built-in ops/sec measurement with CI and diagnostics |
 | **Warmup** | DIY or forget about it | Built-in warmup iterations |
 | **Statistics** | None built-in | Built-in — mean, CI, quantiles, outlier detection |
 | **Dependencies** | Grows with each need — more code to trust | Zero — nothing to audit, nothing to break |
@@ -58,6 +64,7 @@ If you already have Jest tests, adding performance assertions takes one import a
 - **Statistical rigor** — 95% confidence intervals (Student's t / z), IQR outlier detection, skewness analysis, distribution shape classification, quality tags, sample adequacy labels, and interpretive guidance on failure
 - **Warmup iterations** — exclude JIT compilation and cache warming from measurements
 - **Comparative benchmarking** — Welch's t-test to statistically prove one function is faster than another, with one-sided hypothesis testing and configurable confidence levels
+- **Throughput assertions** — verify functions sustain a minimum ops/sec rate over a time window, with per-operation timing statistics and throughput confidence intervals
 - **Exported utilities** — use `calcStats()`, `calcQuantile()`, `removeOutliers()`, and `welchTTest()` directly in your own code
 
 ## Prerequisites
@@ -121,6 +128,22 @@ await expect(async () => {
 expect(() => {
     transformDataset(records);
 }).toCompleteWithinQuantile(200, { iterations: 30, quantile: 95 });
+```
+
+### Message broker throughput
+
+```ts
+expect(() => {
+    processMessage(nextMessage());
+}).toAchieveOpsPerSecond(10000, { duration: 1000, warmup: 100 });
+```
+
+### Async throughput — HTTP handler
+
+```ts
+await expect(async () => {
+    await handleRequest(mockReq);
+}).toResolveAtOpsPerSecond(500, { duration: 2000, warmup: 50, outliers: 'remove' });
 ```
 
 ### Algorithm comparison
@@ -294,6 +317,93 @@ await expect(async () => await slowQuery(db))
     .not.toResolveFasterThan(async () => await fastQuery(db), { iterations: 50 });
 ```
 
+### `.toAchieveOpsPerSecond(expectedOps, options)`
+
+Assert that a synchronous function achieves at least the expected ops/sec over a time-bounded measurement window. Instead of running a fixed number of iterations, the function runs continuously for the specified duration, and the achieved throughput is compared against your target:
+
+```ts
+// Basic — sustain at least 10,000 ops/sec over a 1-second window
+expect(() => {
+    parseJSON(payload);
+}).toAchieveOpsPerSecond(10000, { duration: 1000 });
+
+// With warmup — exclude JIT compilation and cache warming
+expect(() => {
+    parseJSON(payload);
+}).toAchieveOpsPerSecond(10000, { duration: 1000, warmup: 100 });
+
+// With outlier removal — filter GC pauses before measuring throughput
+expect(() => {
+    parseJSON(payload);
+}).toAchieveOpsPerSecond(10000, { duration: 1000, warmup: 100, outliers: 'remove' });
+
+// Negation — assert a function does NOT sustain the given ops/sec
+expect(() => {
+    heavyComputation();
+}).not.toAchieveOpsPerSecond(1000000, { duration: 1000 });
+
+// With error tolerance — tolerate up to 5% of operations throwing
+expect(() => {
+    processUnstableInput(data);
+}).toAchieveOpsPerSecond(5000, { duration: 1000, allowedErrorRate: 0.05 });
+```
+
+### `.toResolveAtOpsPerSecond(expectedOps, options)`
+
+Assert that an asynchronous function achieves at least the expected ops/sec over a time-bounded measurement window. Same API as `.toAchieveOpsPerSecond`, but for promise-returning functions:
+
+```ts
+// Basic
+await expect(async () => {
+    await processMessage(msg);
+}).toResolveAtOpsPerSecond(500, { duration: 2000 });
+
+// With warmup and outlier removal
+await expect(async () => {
+    await handleRequest(mockReq);
+}).toResolveAtOpsPerSecond(500, { duration: 2000, warmup: 50, outliers: 'remove' });
+
+// Negation
+await expect(async () => {
+    await slowOperation();
+}).not.toResolveAtOpsPerSecond(10000, { duration: 1000 });
+```
+
+### Throughput options reference
+
+| Option | Type | Required | Description |
+|---|---|---|---|
+| `duration` | `number` | Yes | Time window in milliseconds over which to measure throughput (e.g., `1000` for 1 second) |
+| `warmup` | `number` | No | Warmup iterations to run before measurement (default: `0`). Not counted toward throughput |
+| `outliers` | `'remove' \| 'keep'` | No | Whether to remove IQR-based outliers from per-operation timings before computing throughput (default: `'keep'`) |
+| `setup` | `() => T` | No | Called **once** before all operations. Return value is shared via `setupEach`, callbacks, and `teardown`. Errors are fatal |
+| `teardown` | `(suiteState: T) => void` | No | Called **once** after all operations (in a `finally` block). Receives the `setup` return value. Errors are fatal |
+| `setupEach` | `(suiteState: T) => U` | No | Called before **each operation** (including warmup), not timed. Its return value is passed to the callback and `teardownEach`. Errors are fatal |
+| `teardownEach` | `(suiteState: T, iterState: U) => void` | No | Called after **each operation** (including warmup), not timed. Receives both `setup` and `setupEach` return values. Errors are fatal |
+| `allowedErrorRate` | `number` | No | Fraction of operations allowed to throw (0-1, default: `0`). Failed operations are excluded from timing stats but counted in total ops. Setup/teardown errors are always fatal |
+
+> **Execution model:** The function runs continuously until the `duration` deadline is reached. Each operation is timed individually, and the achieved ops/sec is computed from the total successful operations divided by the duration. Unlike iteration-based matchers, you do not control how many iterations run — the function runs as many times as it can within the time window.
+
+> **Note:** For async matchers (`toResolveAtOpsPerSecond`), `setup` and `setupEach` may return a `Promise`, and `teardown`/`teardownEach` may return a `Promise`.
+
+#### Throughput setup/teardown example
+
+```ts
+// setup runs once (shared), setupEach runs per operation (fresh state each time)
+expect((conn: DbConnection, batch: Row[]) => {
+    insertBatch(conn, batch);
+}).toAchieveOpsPerSecond(1000, {
+    duration: 2000,
+    warmup: 50,
+    setup: (): DbConnection => createDbConnection(),
+    setupEach: (conn: DbConnection): Row[] => generateBatch(100),
+    teardownEach: (conn: DbConnection, batch: Row[]) => { conn.rollback(); },
+    teardown: (conn: DbConnection) => conn.close(),
+});
+```
+
+Setup, teardown, setupEach, and teardownEach time is excluded from measurements. If any throws, the test fails immediately — these are test infrastructure errors, not tolerated failures.
+
 ### Comparative options reference
 
 | Option | Type | Required | Description |
@@ -421,6 +531,36 @@ The diagnostics include:
 - **Interpretation** — single-sentence summary of result reliability based on the RME × CV × MAD matrix
 - **Warnings** — contextual alerts (e.g., small sample size, empty dataset)
 
+### Throughput matcher diagnostics
+
+When a throughput matcher (`toAchieveOpsPerSecond` / `toResolveAtOpsPerSecond`) fails, it outputs rich diagnostics showing the achieved throughput, per-operation timing statistics, and actionable guidance:
+
+```
+expected function to achieve at least 10,000 ops/sec,
+instead it achieved 8,432 ops/sec (84.3% of target)
+
+Throughput: 8,432 ops/sec over 1,000ms (8,432 total operations)
+  CI 95%: [8,105, 8,759] ops/sec
+  Target: 10,000 ops/sec — shortfall of 1,568 ops/sec (15.7%)
+
+Per-operation timing (n=8432): mean=0.119ms, median=0.108ms, stddev=0.042ms, MAD=0.015ms
+  CI 95%: [0.118, 0.120]ms | RME: 0.89% [GOOD <10%] | CV: 0.35 [POOR >0.3]
+  Distribution: min=0.071ms | P25=0.092ms | P50=0.108ms | P75=0.131ms | P90=0.167ms | max=0.891ms
+  Shape: right-skewed (skewness=3.41) | █▃▁▁▁▁▁▁▁▁
+
+Interpretation: throughput is 15.7% below target; a few extreme outlier ops
+  are dragging down throughput — enable outlier removal via { outliers: 'remove' }
+```
+
+The throughput diagnostics include:
+- **Throughput summary** — achieved ops/sec, measurement duration, total operations completed
+- **Throughput CI** — 95% confidence interval for ops/sec, derived by inverting the per-operation timing CI
+- **Target comparison** — shortfall or surplus in ops/sec and as a percentage
+- **Per-operation timing** — mean, median, standard deviation, and MAD for individual operation durations
+- **Timing CI and quality** — confidence interval, RME, and CV with classification tags (same as quantile matchers)
+- **Distribution and shape** — percentiles, skewness, and ASCII sparkline histogram
+- **Interpretation** — actionable guidance based on the shortfall and data quality
+
 ### Comparative matcher diagnostics
 
 When a comparative matcher (`toBeFasterThan` / `toResolveFasterThan`) fails, it outputs diagnostics for both functions and a statistical comparison:
@@ -468,6 +608,16 @@ The comparative diagnostics include:
 - **Use `setupEach`** to provide fresh data for each iteration — prevents mutation in one function from affecting the other
 - **Check practical significance** — a significant p-value (< α) means Function A is statistically faster, but check the percentage difference to decide if it matters in practice
 - **If the CI for the difference includes zero** — the functions may have equivalent performance; increase iterations for more statistical power
+
+### Throughput testing tips
+
+- **Choose a meaningful duration** — use at least 1000ms for stable results; shorter windows increase variance
+- **Add warmup** — warmup iterations stabilize JIT compilation and caches before the timed window begins
+- **Enable outlier removal** (`outliers: 'remove'`) — a few slow operations can significantly drag down average throughput
+- **Use `setupEach`** to provide fresh data per operation — prevents accumulated state from affecting timing
+- **Set realistic targets** — measure your baseline first, then set a threshold with headroom (e.g., 80% of observed throughput)
+- **Account for CI variability** — shared runners may have lower throughput; allow more headroom than local measurements suggest
+- **Check the throughput CI** — if the CI lower bound is below your target, the function may not reliably sustain the required rate
 
 ### How to use each metric
 
@@ -664,7 +814,8 @@ Fields are `null` when there is insufficient data to compute them (e.g., `stddev
 
 1. **Measure multiple runs** — a single execution is noisy; use `iterations` for stable data
 2. **Assert on quantiles** — P95 means "95% of runs were this fast or faster"
-3. **Warm up, then measure** — let JIT and caches stabilize before collecting data
+3. **Assert on throughput** — ops/sec over a time window captures sustained performance, not just single-operation latency
+4. **Warm up, then measure** — let JIT and caches stabilize before collecting data
 
 ## How to Contribute
 

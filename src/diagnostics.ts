@@ -255,3 +255,83 @@ export function formatPValue(p: number): string {
   if (p < 0.0001) return '<0.0001';
   return p.toFixed(4);
 }
+
+/**
+ * Generate a human-readable interpretation of throughput benchmark results.
+ *
+ * Considers throughput vs target, per-op RME, CV, and MAD to diagnose:
+ * | Throughput | RME       | CV   | MAD        | Outcome                                           |
+ * |-----------|-----------|------|------------|---------------------------------------------------|
+ * | Above     | GOOD      | GOOD | —          | Target met, stable and precise                    |
+ * | Above     | any       | POOR | GOOD/FAIR  | Target met, few outlier ops slower, stable overall|
+ * | Above     | any       | POOR | POOR/null  | Target met but genuinely unstable                 |
+ * | Below     | POOR      | any  | —          | Measurement unreliable, need longer duration      |
+ * | Below     | GOOD/FAIR | POOR | GOOD/FAIR  | Below target, outlier spikes — enable outlier removal |
+ * | Below     | GOOD/FAIR | POOR | POOR/null  | Below target, genuinely inconsistent              |
+ * | Below     | GOOD/FAIR | GOOD | —          | Consistently below target — code is too slow      |
+ */
+export function generateThroughputInterpretation(
+  stats: Stats,
+  actualOpsPerSecond: number,
+  expectedOpsPerSecond: number,
+  errorInfo?: { errorCount: number; totalIterations: number; allowedRate: number },
+): string {
+  const rme = classifyRME(stats.relativeMarginOfError);
+  const cv = classifyCV(stats.coefficientOfVariation);
+  const mad = classifyMAD(stats.mad, stats.median);
+
+  if (stats.confidenceInterval === null) {
+    return 'throughput measurement has insufficient data for statistical analysis — increase duration to collect more operations';
+  }
+  if (rme === null) {
+    return 'per-operation timing mean is near zero — throughput statistics cannot be computed reliably';
+  }
+  /* istanbul ignore next -- defensive guard: cv is always non-null when rme is non-null */
+  if (cv === null) {
+    return 'per-operation timing mean is near zero — throughput statistics cannot be computed reliably';
+  }
+
+  const aboveTarget = actualOpsPerSecond >= expectedOpsPerSecond;
+  const pctOfTarget = (actualOpsPerSecond / expectedOpsPerSecond) * 100;
+  const pctDiff = Math.abs(pctOfTarget - 100);
+
+  let message: string;
+  if (aboveTarget) {
+    message = interpretThroughputAbove(rme, cv, mad, pctOfTarget);
+  } else {
+    message = interpretThroughputBelow(rme, cv, mad, pctDiff);
+  }
+
+  if (errorInfo !== undefined && errorInfo.errorCount > 0) {
+    message += `. Note: ${errorInfo.errorCount} of ${errorInfo.totalIterations} operations failed and were excluded — stats reflect successful ops only`;
+  }
+
+  return message;
+}
+
+function interpretThroughputAbove(rme: Tag, cv: Tag, mad: Tag | null, pctOfTarget: number): string {
+  const surplus = pctOfTarget > 100 ? ` (${(pctOfTarget - 100).toFixed(1)}% above target)` : '';
+  if (cv.label === 'POOR') {
+    if (mad !== null && mad.label !== 'POOR') {
+      return `throughput target met${surplus} with stable overall throughput, but a few outlier ops are much slower (CV: ${formatTag(cv)}, MAD: ${formatTag(mad)}) — consider enabling outlier removal for cleaner stats`;
+    }
+    return `throughput target met${surplus} but throughput is genuinely unstable — ops vary widely (CV: ${formatTag(cv)})`;
+  }
+  if (rme.label === 'FAIR') {
+    return `throughput target met${surplus} with stable measurements and moderate precision (RME: ${formatTag(rme)}, CV: ${formatTag(cv)})`;
+  }
+  return `throughput target met${surplus} with stable, precise measurements (RME: ${formatTag(rme)}, CV: ${formatTag(cv)})`;
+}
+
+function interpretThroughputBelow(rme: Tag, cv: Tag, mad: Tag | null, pctBelow: number): string {
+  if (rme.label === 'POOR') {
+    return `throughput is ${pctBelow.toFixed(1)}% below target but measurement is unreliable (RME: ${formatTag(rme)}) — increase duration to collect more operations`;
+  }
+  if (cv.label === 'POOR') {
+    if (mad !== null && mad.label !== 'POOR') {
+      return `throughput is ${pctBelow.toFixed(1)}% below target; a few extreme outlier ops are dragging down throughput (CV: ${formatTag(cv)}, MAD: ${formatTag(mad)}) — enable outlier removal via { outliers: 'remove' }`;
+    }
+    return `throughput is ${pctBelow.toFixed(1)}% below target; ops are genuinely inconsistent (CV: ${formatTag(cv)}) — investigate environment stability`;
+  }
+  return `throughput is consistently ${pctBelow.toFixed(1)}% below target with stable measurements (RME: ${formatTag(rme)}, CV: ${formatTag(cv)}) — the code is genuinely too slow`;
+}
