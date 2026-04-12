@@ -1,6 +1,7 @@
 import {
   classifyRME, classifyCV, classifyMAD, classifySampleAdequacy,
-  generateInterpretation, generateComparisonInterpretation, generateThroughputInterpretation, formatTag, Tag
+  generateInterpretation, generateComparisonInterpretation, generateThroughputInterpretation,
+  hasWarningConditions, formatTag, Tag
 } from '../src/diagnostics';
 import {formatMs} from '../src/format';
 import {Stats, WelchTTestResult} from '../src/metrics';
@@ -959,5 +960,157 @@ describe("generateThroughputInterpretation", () => {
 
     // THEN it reports target met (since actualOps >= expectedOps)
     expect(actualResult).toContain('throughput target met');
+  });
+});
+
+describe("hasWarningConditions", () => {
+  function buildStats(overrides: Partial<Stats>): Stats {
+    return {
+      n: 31, min: 1, max: 10, mean: 5, median: 5, stddev: 1,
+      marginOfError: 0.35, relativeMarginOfError: 7.0,
+      confidenceInterval: [4.65, 5.35] as [number, number],
+      coefficientOfVariation: 0.05, skewness: 0, mad: 1, isSmallSample: false,
+      confidenceMethod: 'z', confidenceCriticalValue: 1.96, warnings: [],
+      ...overrides,
+    };
+  }
+
+  test("should return false when all conditions are clean", () => {
+    // GIVEN stats with all GOOD classifications and no error info
+    const givenStats = buildStats({});
+
+    // WHEN checking for warning conditions
+    const actualResult = hasWarningConditions(givenStats, 10);
+
+    // THEN no warnings are detected
+    expect(actualResult).toBe(false);
+  });
+
+  test("should return true when sample adequacy is POOR (n < 10)", () => {
+    // GIVEN stats with n < 10
+    const givenStats = buildStats({n: 5});
+
+    // WHEN checking for warning conditions
+    const actualResult = hasWarningConditions(givenStats);
+
+    // THEN a warning is detected
+    expect(actualResult).toBe(true);
+  });
+
+  test("should return true when RME is POOR (> 30%)", () => {
+    // GIVEN stats with POOR RME
+    const givenStats = buildStats({relativeMarginOfError: 35});
+
+    // WHEN checking for warning conditions
+    const actualResult = hasWarningConditions(givenStats);
+
+    // THEN a warning is detected
+    expect(actualResult).toBe(true);
+  });
+
+  test("should return true when CV is POOR (> 0.3)", () => {
+    // GIVEN stats with POOR CV
+    const givenStats = buildStats({coefficientOfVariation: 0.5});
+
+    // WHEN checking for warning conditions
+    const actualResult = hasWarningConditions(givenStats);
+
+    // THEN a warning is detected
+    expect(actualResult).toBe(true);
+  });
+
+  test("should return true when CI upper bound exceeds the threshold", () => {
+    // GIVEN stats with CI upper bound above the threshold
+    const givenStats = buildStats({confidenceInterval: [4.0, 6.0]});
+
+    // WHEN checking with threshold below CI upper
+    const actualResult = hasWarningConditions(givenStats, 5.5);
+
+    // THEN a warning is detected
+    expect(actualResult).toBe(true);
+  });
+
+  test("should return true when CI range is entirely above the threshold", () => {
+    // GIVEN stats with CI entirely above the threshold
+    const givenStats = buildStats({confidenceInterval: [6.0, 8.0]});
+
+    // WHEN checking with threshold below CI lower
+    const actualResult = hasWarningConditions(givenStats, 5.0);
+
+    // THEN a warning is detected
+    expect(actualResult).toBe(true);
+  });
+
+  test("should return true when error rate is non-zero", () => {
+    // GIVEN clean stats but non-zero error info
+    const givenStats = buildStats({});
+    const givenErrorInfo = {errorCount: 2, totalIterations: 31, allowedRate: 0.1};
+
+    // WHEN checking for warning conditions
+    const actualResult = hasWarningConditions(givenStats, undefined, givenErrorInfo);
+
+    // THEN a warning is detected
+    expect(actualResult).toBe(true);
+  });
+
+  test("should return false when errorInfo has zero errors", () => {
+    // GIVEN clean stats with zero-error errorInfo
+    const givenStats = buildStats({});
+    const givenErrorInfo = {errorCount: 0, totalIterations: 31, allowedRate: 0.1};
+
+    // WHEN checking for warning conditions
+    const actualResult = hasWarningConditions(givenStats, 10, givenErrorInfo);
+
+    // THEN no warnings are detected
+    expect(actualResult).toBe(false);
+  });
+
+  test("should return false when CI is null and no threshold", () => {
+    // GIVEN stats with null CI and no threshold
+    const givenStats = buildStats({confidenceInterval: null});
+
+    // WHEN checking without a threshold
+    const actualResult = hasWarningConditions(givenStats);
+
+    // THEN no warnings (CI check is skipped)
+    expect(actualResult).toBe(false);
+  });
+
+  test("should return false when RME and CV are null (mean ≈ 0)", () => {
+    // GIVEN stats where RME and CV are null
+    const givenStats = buildStats({
+      relativeMarginOfError: null, coefficientOfVariation: null,
+    });
+
+    // WHEN checking for warning conditions
+    const actualResult = hasWarningConditions(givenStats);
+
+    // THEN no warnings from null classifiers
+    expect(actualResult).toBe(false);
+  });
+
+  test("should return true when multiple warning conditions hold simultaneously", () => {
+    // GIVEN stats with POOR sample, POOR RME, POOR CV, and non-zero errors all together
+    const givenStats = buildStats({
+      n: 5, relativeMarginOfError: 50, coefficientOfVariation: 0.6,
+    });
+    const givenErrorInfo = {errorCount: 3, totalIterations: 8, allowedRate: 0.5};
+
+    // WHEN checking for warning conditions
+    const actualResult = hasWarningConditions(givenStats, 5.5, givenErrorInfo);
+
+    // THEN a warning is detected (short-circuits on the first match)
+    expect(actualResult).toBe(true);
+  });
+
+  test("should return false when threshold is undefined even with wide CI", () => {
+    // GIVEN stats with wide CI but no threshold provided
+    const givenStats = buildStats({confidenceInterval: [1, 100]});
+
+    // WHEN checking without a threshold
+    const actualResult = hasWarningConditions(givenStats);
+
+    // THEN no CI-related warning
+    expect(actualResult).toBe(false);
   });
 });

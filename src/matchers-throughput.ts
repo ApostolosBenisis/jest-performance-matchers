@@ -42,6 +42,7 @@ export function toAchieveOpsPerSecond(callback: SyncCallback, expectedOpsPerSeco
   setupEach?: (suiteState: unknown) => unknown,
   teardownEach?: (suiteState: unknown, iterState: unknown) => void,
   allowedErrorRate?: number,
+  logDiagnostics?: 'INFO' | 'WARN' | 'FAIL',
 }) {
   validateCallback(callback);
   validateExpectedOpsPerSecond(expectedOpsPerSecond);
@@ -49,6 +50,7 @@ export function toAchieveOpsPerSecond(callback: SyncCallback, expectedOpsPerSeco
 
   const hooks: SyncHooks = options;
   const allowedErrorRate = options.allowedErrorRate ?? 0;
+  const logDiagnostics = options.logDiagnostics ?? 'WARN';
   const suiteState = hooks.setup ? hooks.setup() : undefined;
 
   try {
@@ -62,6 +64,7 @@ export function toAchieveOpsPerSecond(callback: SyncCallback, expectedOpsPerSeco
       durations, totalOps, errorCount, allowedErrorRate,
       expectedOpsPerSecond, duration: options.duration,
       setupTeardownActive, removeOutliersEnabled: options.outliers === 'remove',
+      logDiagnostics,
     });
   } finally {
     if (hooks.teardown) hooks.teardown(suiteState);
@@ -107,6 +110,7 @@ export async function toResolveAtOpsPerSecond(callback: AsyncCallback, expectedO
   setupEach?: (suiteState: unknown) => unknown,
   teardownEach?: (suiteState: unknown, iterState: unknown) => void | Promise<void>,
   allowedErrorRate?: number,
+  logDiagnostics?: 'INFO' | 'WARN' | 'FAIL',
 }) {
   validateCallback(callback);
   validateExpectedOpsPerSecond(expectedOpsPerSecond);
@@ -114,6 +118,7 @@ export async function toResolveAtOpsPerSecond(callback: AsyncCallback, expectedO
 
   const hooks: AsyncHooks = options;
   const allowedErrorRate = options.allowedErrorRate ?? 0;
+  const logDiagnostics = options.logDiagnostics ?? 'WARN';
   const suiteState = hooks.setup ? await hooks.setup() : undefined;
 
   try {
@@ -127,6 +132,7 @@ export async function toResolveAtOpsPerSecond(callback: AsyncCallback, expectedO
       durations, totalOps, errorCount, allowedErrorRate,
       expectedOpsPerSecond, duration: options.duration,
       setupTeardownActive, removeOutliersEnabled: options.outliers === 'remove',
+      logDiagnostics,
     });
   } finally {
     if (hooks.teardown) await hooks.teardown(suiteState);

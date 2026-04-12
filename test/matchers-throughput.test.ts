@@ -1,7 +1,7 @@
 import '../src/main';
 import {processThroughputResults} from '../src/helpers';
 import {mockThroughputTimings} from './test-utils';
-import {printExpected, printReceived} from "jest-matcher-utils";
+import {printExpected} from "jest-matcher-utils";
 
 describe("toAchieveOpsPerSecond", () => {
   beforeEach(() => {
@@ -155,7 +155,7 @@ describe("toAchieveOpsPerSecond", () => {
       }
 
       // THEN the failure message includes a throughput confidence interval
-      expect(actualMessage).toMatch(/CI 95%: \[\d+, \d+\] ops\/sec/);
+      expect(actualMessage).toMatch(/CI 95%: \[\d+, \d+] ops\/sec/);
     });
 
     test("should show target shortfall info when below target", () => {
@@ -413,7 +413,7 @@ describe("toAchieveOpsPerSecond", () => {
       }).toAchieveOpsPerSecond(1, {
         duration: givenDuration,
         setup: () => givenSuiteState,
-        setupEach: (suiteState) => `foo-iter-${++callCount}`,
+        setupEach: () => `foo-iter-${++callCount}`,
         teardownEach: (suiteState, iterState) => {
           actualTeardownArgs.push([suiteState, iterState]);
         },
@@ -634,8 +634,8 @@ describe("toAchieveOpsPerSecond", () => {
 
     test("should throw validation error when options is null", () => {
       expect(() => {
-        // @ts-expect-error - intentionally passing null for testing
-        expect(() => undefined).toAchieveOpsPerSecond(100, null);
+        // intentionally passing null for testing
+        expect(() => undefined).toAchieveOpsPerSecond(100, null as unknown as {duration: number});
       }).toThrow("jest-performance-matchers: options must be an object with duration");
     });
 
@@ -1008,7 +1008,7 @@ describe("processThroughputResults", () => {
     const actualResult = processThroughputResults({
       durations: [], totalOps: 5, errorCount: 5, allowedErrorRate: 1,
       expectedOpsPerSecond: 100, duration: 1000,
-      setupTeardownActive: false, removeOutliersEnabled: false,
+      setupTeardownActive: false, removeOutliersEnabled: false, logDiagnostics: 'FAIL',
     });
 
     // THEN the result fails with an all-failed error message
@@ -1021,7 +1021,7 @@ describe("processThroughputResults", () => {
     const actualResult = processThroughputResults({
       durations: [10, 10], totalOps: 5, errorCount: 3, allowedErrorRate: 0.1,
       expectedOpsPerSecond: 1, duration: 1000,
-      setupTeardownActive: false, removeOutliersEnabled: false,
+      setupTeardownActive: false, removeOutliersEnabled: false, logDiagnostics: 'FAIL',
     });
 
     // THEN the result fails with an error rate exceeded message
@@ -1034,10 +1034,141 @@ describe("processThroughputResults", () => {
     const actualResult = processThroughputResults({
       durations: [10], totalOps: 1, errorCount: 0, allowedErrorRate: 0,
       expectedOpsPerSecond: 1, duration: 1000,
-      setupTeardownActive: false, removeOutliersEnabled: false,
+      setupTeardownActive: false, removeOutliersEnabled: false, logDiagnostics: 'FAIL',
     });
 
     // THEN the result passes
     expect(actualResult.pass).toBe(true);
+  });
+});
+
+describe("logDiagnostics option (toAchieveOpsPerSecond)", () => {
+  beforeEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  test("should log via console.info on passing test when logDiagnostics is 'INFO'", () => {
+    // GIVEN a function that achieves the target
+    const givenOpDurations = [10, 10, 10, 10, 10];
+    const givenDuration = 1000;
+    mockThroughputTimings(givenOpDurations, givenDuration);
+    const infoSpy = jest.spyOn(console, 'info').mockImplementation();
+
+    // WHEN asserting with logDiagnostics: 'INFO'
+    expect(() => undefined).toAchieveOpsPerSecond(5, {
+      duration: givenDuration, logDiagnostics: 'INFO',
+    });
+
+    // THEN console.info is called with the diagnostics block
+    expect(infoSpy).toHaveBeenCalledTimes(1);
+    expect(infoSpy.mock.calls[0][0]).toContain('[jest-performance-matchers] Diagnostics:');
+  });
+
+  test("should log via console.warn on passing test with warnings (default WARN)", () => {
+    // GIVEN a function with only 1 operation (POOR sample adequacy)
+    const givenOpDurations = [10];
+    const givenDuration = 1000;
+    mockThroughputTimings(givenOpDurations, givenDuration);
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation();
+
+    // WHEN asserting without logDiagnostics (defaults to WARN)
+    expect(() => undefined).toAchieveOpsPerSecond(1, {duration: givenDuration});
+
+    // THEN console.warn is called because n=1 triggers POOR sample adequacy
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy.mock.calls[0][0]).toContain('[jest-performance-matchers] Diagnostics (warnings detected):');
+  });
+
+  test("should not log on passing test when logDiagnostics is 'FAIL'", () => {
+    // GIVEN a function with only 1 operation (POOR sample adequacy)
+    const givenOpDurations = [10];
+    const givenDuration = 1000;
+    mockThroughputTimings(givenOpDurations, givenDuration);
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation();
+    const infoSpy = jest.spyOn(console, 'info').mockImplementation();
+
+    // WHEN asserting with logDiagnostics: 'FAIL'
+    expect(() => undefined).toAchieveOpsPerSecond(1, {
+      duration: givenDuration, logDiagnostics: 'FAIL',
+    });
+
+    // THEN no console output
+    expect(warnSpy).not.toHaveBeenCalled();
+    expect(infoSpy).not.toHaveBeenCalled();
+  });
+
+  test("should not log on passing test when logDiagnostics is 'WARN' and no warnings", () => {
+    // GIVEN a function with 31 consistent operations (no warning conditions)
+    const givenOpDurations = Array(31).fill(10);
+    const givenDuration = 1000;
+    mockThroughputTimings(givenOpDurations, givenDuration);
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation();
+    const infoSpy = jest.spyOn(console, 'info').mockImplementation();
+
+    // WHEN asserting with default logDiagnostics (WARN)
+    expect(() => undefined).toAchieveOpsPerSecond(5, {duration: givenDuration});
+
+    // THEN no console output (no warning conditions detected)
+    expect(warnSpy).not.toHaveBeenCalled();
+    expect(infoSpy).not.toHaveBeenCalled();
+  });
+
+  test("should not log on failing test regardless of logDiagnostics level", () => {
+    // GIVEN a function that does NOT achieve the target
+    const givenOpDurations = [10, 10, 10, 10, 10];
+    const givenDuration = 1000;
+    mockThroughputTimings(givenOpDurations, givenDuration);
+    const infoSpy = jest.spyOn(console, 'info').mockImplementation();
+
+    // WHEN asserting with logDiagnostics: 'INFO' for an impossible target
+    expect(() => {
+      expect(() => undefined).toAchieveOpsPerSecond(10000, {
+        duration: givenDuration, logDiagnostics: 'INFO',
+      });
+    }).toThrow();
+
+    // THEN no console output
+    expect(infoSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("logDiagnostics option (toResolveAtOpsPerSecond)", () => {
+  beforeEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  test("should log via console.info on passing async test when logDiagnostics is 'INFO'", async () => {
+    // GIVEN an async function that achieves the target
+    const givenOpDurations = [10, 10, 10, 10, 10];
+    const givenDuration = 1000;
+    mockThroughputTimings(givenOpDurations, givenDuration);
+    const infoSpy = jest.spyOn(console, 'info').mockImplementation();
+
+    // WHEN asserting with logDiagnostics: 'INFO'
+    await expect(async () => undefined).toResolveAtOpsPerSecond(5, {
+      duration: givenDuration, logDiagnostics: 'INFO',
+    });
+
+    // THEN console.info is called
+    expect(infoSpy).toHaveBeenCalledTimes(1);
+    expect(infoSpy.mock.calls[0][0]).toContain('[jest-performance-matchers] Diagnostics:');
+  });
+
+  test("should not log on failing async test with logDiagnostics 'INFO'", async () => {
+    // GIVEN an async function that does NOT achieve the target
+    const givenOpDurations = [10, 10, 10, 10, 10];
+    const givenDuration = 1000;
+    mockThroughputTimings(givenOpDurations, givenDuration);
+    const infoSpy = jest.spyOn(console, 'info').mockImplementation();
+
+    // WHEN asserting for an impossible target
+    await expect(
+      expect(async () => undefined).toResolveAtOpsPerSecond(10000, {
+        duration: givenDuration, logDiagnostics: 'INFO',
+      })
+    ).rejects.toThrow();
+
+    // THEN no console output
+    expect(infoSpy).not.toHaveBeenCalled();
   });
 });

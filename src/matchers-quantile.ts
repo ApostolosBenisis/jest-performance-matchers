@@ -18,6 +18,7 @@ export function toCompleteWithinQuantile(callback: SyncCallback, expectedDuratio
   setupEach?: (suiteState: unknown) => unknown,
   teardownEach?: (suiteState: unknown, iterState: unknown) => void,
   allowedErrorRate?: number,
+  logDiagnostics?: 'INFO' | 'WARN' | 'FAIL',
 }) {
   validateCallback(callback);
   validateDuration(expectedDurationInMilliseconds);
@@ -27,6 +28,7 @@ export function toCompleteWithinQuantile(callback: SyncCallback, expectedDuratio
   const quantile = options.quantile;
   const hooks: SyncHooks = options;
   const allowedErrorRate = options.allowedErrorRate ?? 0;
+  const logDiagnostics = options.logDiagnostics ?? 'WARN';
   const suiteState = hooks.setup ? hooks.setup() : undefined;
 
   try {
@@ -39,7 +41,7 @@ export function toCompleteWithinQuantile(callback: SyncCallback, expectedDuratio
     }
 
     const setupTeardownActive = !!(hooks.setup || hooks.teardown || hooks.setupEach || hooks.teardownEach);
-    return processQuantileResults({durations, count, quantile, errorCount, allowedErrorRate, expectedDurationInMilliseconds, setupTeardownActive, removeOutliersEnabled: options.outliers === 'remove'});
+    return processQuantileResults({durations, count, quantile, errorCount, allowedErrorRate, expectedDurationInMilliseconds, setupTeardownActive, removeOutliersEnabled: options.outliers === 'remove', logDiagnostics});
   } finally {
     if (hooks.teardown) hooks.teardown(suiteState);
   }
@@ -61,6 +63,7 @@ export async function toResolveWithinQuantile(promise: AsyncCallback, expectedDu
   setupEach?: (suiteState: unknown) => unknown,
   teardownEach?: (suiteState: unknown, iterState: unknown) => void | Promise<void>,
   allowedErrorRate?: number,
+  logDiagnostics?: 'INFO' | 'WARN' | 'FAIL',
 }) {
   validateCallback(promise);
   validateDuration(expectedDurationInMilliseconds);
@@ -70,6 +73,7 @@ export async function toResolveWithinQuantile(promise: AsyncCallback, expectedDu
   const quantile = options.quantile;
   const hooks: AsyncHooks = options;
   const allowedErrorRate = options.allowedErrorRate ?? 0;
+  const logDiagnostics = options.logDiagnostics ?? 'WARN';
   const suiteState = hooks.setup ? await hooks.setup() : undefined;
 
   try {
@@ -82,7 +86,7 @@ export async function toResolveWithinQuantile(promise: AsyncCallback, expectedDu
     }
 
     const setupTeardownActive = !!(hooks.setup || hooks.teardown || hooks.setupEach || hooks.teardownEach);
-    return processQuantileResults({durations, count, quantile, errorCount, allowedErrorRate, expectedDurationInMilliseconds, setupTeardownActive, removeOutliersEnabled: options.outliers === 'remove'});
+    return processQuantileResults({durations, count, quantile, errorCount, allowedErrorRate, expectedDurationInMilliseconds, setupTeardownActive, removeOutliersEnabled: options.outliers === 'remove', logDiagnostics});
   } finally {
     if (hooks.teardown) await hooks.teardown(suiteState);
   }

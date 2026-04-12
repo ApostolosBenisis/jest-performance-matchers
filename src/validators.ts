@@ -1,3 +1,9 @@
+function validateLogDiagnostics(logDiagnostics: string | undefined): void {
+  if (logDiagnostics !== undefined && logDiagnostics !== 'INFO' && logDiagnostics !== 'WARN' && logDiagnostics !== 'FAIL') {
+    throw new Error(`jest-performance-matchers: logDiagnostics must be 'INFO', 'WARN', or 'FAIL', received '${logDiagnostics}'`);
+  }
+}
+
 export function validateCallback(callback: unknown): void {
   if (typeof callback !== 'function') {
     throw new TypeError(`jest-performance-matchers: expected value must be a function, received ${typeof callback}`);
@@ -39,7 +45,8 @@ export function validateQuantileOptions(options: {
   teardown?: unknown,
   setupEach?: unknown,
   teardownEach?: unknown,
-  allowedErrorRate?: number
+  allowedErrorRate?: number,
+  logDiagnostics?: string,
 }): void {
   if (!options || typeof options !== 'object') {
     throw new Error('jest-performance-matchers: options must be an object with iterations and quantile');
@@ -61,6 +68,7 @@ export function validateQuantileOptions(options: {
       throw new Error(`jest-performance-matchers: allowedErrorRate must be a number between 0 and 1, received ${options.allowedErrorRate}`);
     }
   }
+  validateLogDiagnostics(options.logDiagnostics);
   validateSetupTeardown(options);
 }
 
@@ -74,6 +82,7 @@ export function validateComparativeOptions(options: {
   setupEach?: unknown,
   teardownEach?: unknown,
   allowedErrorRate?: number,
+  logDiagnostics?: string,
 }): void {
   if (!options || typeof options !== 'object') {
     throw new Error('jest-performance-matchers: options must be an object with iterations');
@@ -97,6 +106,7 @@ export function validateComparativeOptions(options: {
       throw new Error(`jest-performance-matchers: allowedErrorRate must be a number between 0 and 1, received ${options.allowedErrorRate}`);
     }
   }
+  validateLogDiagnostics(options.logDiagnostics);
   validateSetupTeardown(options);
 }
 
@@ -115,6 +125,7 @@ export function validateThroughputOptions(options: {
   setupEach?: unknown,
   teardownEach?: unknown,
   allowedErrorRate?: number,
+  logDiagnostics?: string,
 }): void {
   if (!options || typeof options !== 'object') {
     throw new Error('jest-performance-matchers: options must be an object with duration');
@@ -133,5 +144,6 @@ export function validateThroughputOptions(options: {
       throw new Error(`jest-performance-matchers: allowedErrorRate must be a number between 0 and 1, received ${options.allowedErrorRate}`);
     }
   }
+  validateLogDiagnostics(options.logDiagnostics);
   validateSetupTeardown(options);
 }
