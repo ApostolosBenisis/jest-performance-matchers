@@ -99,3 +99,39 @@ export function validateComparativeOptions(options: {
   }
   validateSetupTeardown(options);
 }
+
+export function validateExpectedOpsPerSecond(expectedOpsPerSecond: number): void {
+  if (typeof expectedOpsPerSecond !== 'number' || !Number.isFinite(expectedOpsPerSecond) || expectedOpsPerSecond <= 0) {
+    throw new Error(`jest-performance-matchers: expected ops/sec must be a positive number, received ${expectedOpsPerSecond}`);
+  }
+}
+
+export function validateThroughputOptions(options: {
+  duration: number,
+  warmup?: number,
+  outliers?: 'remove' | 'keep',
+  setup?: unknown,
+  teardown?: unknown,
+  setupEach?: unknown,
+  teardownEach?: unknown,
+  allowedErrorRate?: number,
+}): void {
+  if (!options || typeof options !== 'object') {
+    throw new Error('jest-performance-matchers: options must be an object with duration');
+  }
+  if (typeof options.duration !== 'number' || !Number.isFinite(options.duration) || options.duration <= 0) {
+    throw new Error(`jest-performance-matchers: duration must be a positive number, received ${options.duration}`);
+  }
+  if (options.warmup !== undefined && (!Number.isInteger(options.warmup) || options.warmup < 0)) {
+    throw new Error(`jest-performance-matchers: warmup must be a non-negative integer, received ${options.warmup}`);
+  }
+  if (options.outliers !== undefined && options.outliers !== 'remove' && options.outliers !== 'keep') {
+    throw new Error(`jest-performance-matchers: outliers must be 'remove' or 'keep', received '${options.outliers}'`);
+  }
+  if (options.allowedErrorRate !== undefined) {
+    if (typeof options.allowedErrorRate !== 'number' || !Number.isFinite(options.allowedErrorRate) || options.allowedErrorRate < 0 || options.allowedErrorRate > 1) {
+      throw new Error(`jest-performance-matchers: allowedErrorRate must be a number between 0 and 1, received ${options.allowedErrorRate}`);
+    }
+  }
+  validateSetupTeardown(options);
+}

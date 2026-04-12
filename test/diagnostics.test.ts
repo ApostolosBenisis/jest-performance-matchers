@@ -1,6 +1,6 @@
 import {
   classifyRME, classifyCV, classifyMAD, classifySampleAdequacy,
-  generateInterpretation, generateComparisonInterpretation, formatTag, Tag
+  generateInterpretation, generateComparisonInterpretation, generateThroughputInterpretation, formatTag, Tag
 } from '../src/diagnostics';
 import {Stats, WelchTTestResult} from '../src/metrics';
 
@@ -781,5 +781,182 @@ describe("Test generateComparisonInterpretation function", () => {
 
     // THEN it reports significance without throwing a division-by-zero error
     expect(actualResult).toContain('statistically significantly faster');
+  });
+});
+
+describe("generateThroughputInterpretation", () => {
+  function buildThroughputStats(overrides: Partial<Stats>): Stats {
+    return {
+      n: 31, min: 1, max: 10, mean: 5, median: 5, stddev: 1,
+      marginOfError: 0.35, relativeMarginOfError: 7.0,
+      confidenceInterval: [4.65, 5.35],
+      coefficientOfVariation: 0.05, skewness: 0, mad: 1, isSmallSample: false,
+      confidenceMethod: 'z', confidenceCriticalValue: 1.96, warnings: [],
+      ...overrides,
+    };
+  }
+
+  test("should report stable and precise when above target with GOOD RME and GOOD CV", () => {
+    // GIVEN per-operation stats are precise and consistent, with throughput above target
+    const givenStats = buildThroughputStats({relativeMarginOfError: 5, coefficientOfVariation: 0.05});
+
+    // WHEN interpreting throughput results
+    const actualResult = generateThroughputInterpretation(givenStats, 200, 100);
+
+    // THEN it reports target met with stable measurements
+    expect(actualResult).toContain('throughput target met');
+    expect(actualResult).toContain('stable, precise measurements');
+  });
+
+  test("should report outlier warning when above target with POOR CV and GOOD MAD", () => {
+    // GIVEN per-operation variance is high but concentrated in a few outliers, with throughput above target
+    const givenStats = buildThroughputStats({coefficientOfVariation: 0.5, mad: 0.3, median: 5});
+
+    // WHEN interpreting throughput results
+    const actualResult = generateThroughputInterpretation(givenStats, 200, 100);
+
+    // THEN it reports outlier ops slower
+    expect(actualResult).toContain('few outlier ops are much slower');
+    expect(actualResult).toContain('outlier removal');
+  });
+
+  test("should report genuinely unstable when above target with POOR CV and POOR MAD", () => {
+    // GIVEN per-operation variance is genuinely high across all runs, with throughput above target
+    const givenStats = buildThroughputStats({coefficientOfVariation: 0.5, mad: 2, median: 5});
+
+    // WHEN interpreting throughput results
+    const actualResult = generateThroughputInterpretation(givenStats, 200, 100);
+
+    // THEN it reports genuinely unstable
+    expect(actualResult).toContain('genuinely unstable');
+  });
+
+  test("should report genuinely unstable when above target with POOR CV and null MAD", () => {
+    // GIVEN per-operation variance is high with unknown dispersion pattern, and throughput above target
+    const givenStats = buildThroughputStats({coefficientOfVariation: 0.5, mad: null});
+
+    // WHEN interpreting throughput results
+    const actualResult = generateThroughputInterpretation(givenStats, 200, 100);
+
+    // THEN it reports genuinely unstable
+    expect(actualResult).toContain('genuinely unstable');
+  });
+
+  test("should report moderate precision when above target with FAIR RME", () => {
+    // GIVEN per-operation stats have moderate precision and low variance, with throughput above target
+    const givenStats = buildThroughputStats({relativeMarginOfError: 15, coefficientOfVariation: 0.05});
+
+    // WHEN interpreting throughput results
+    const actualResult = generateThroughputInterpretation(givenStats, 200, 100);
+
+    // THEN it reports moderate precision, not "precise"
+    expect(actualResult).toContain('moderate precision');
+    expect(actualResult).not.toContain('stable, precise');
+  });
+
+  test("should report unreliable measurement when below target with POOR RME", () => {
+    // GIVEN per-operation measurement is unreliable, with throughput below target
+    const givenStats = buildThroughputStats({relativeMarginOfError: 40});
+
+    // WHEN interpreting throughput results
+    const actualResult = generateThroughputInterpretation(givenStats, 50, 100);
+
+    // THEN it reports unreliable measurement
+    expect(actualResult).toContain('measurement is unreliable');
+    expect(actualResult).toContain('increase duration');
+  });
+
+  test("should report outlier drag when below target with GOOD RME, POOR CV, and GOOD MAD", () => {
+    // GIVEN per-operation stats are precise but outliers are inflating variance, with throughput below target
+    const givenStats = buildThroughputStats({relativeMarginOfError: 5, coefficientOfVariation: 0.5, mad: 0.3, median: 5});
+
+    // WHEN interpreting throughput results
+    const actualResult = generateThroughputInterpretation(givenStats, 50, 100);
+
+    // THEN it reports outlier spikes dragging down throughput
+    expect(actualResult).toContain('extreme outlier ops are dragging down throughput');
+    expect(actualResult).toContain('outlier removal');
+  });
+
+  test("should report genuine inconsistency when below target with POOR CV and POOR MAD", () => {
+    // GIVEN per-operation runs are genuinely inconsistent across all runs, with throughput below target
+    const givenStats = buildThroughputStats({relativeMarginOfError: 5, coefficientOfVariation: 0.5, mad: 2, median: 5});
+
+    // WHEN interpreting throughput results
+    const actualResult = generateThroughputInterpretation(givenStats, 50, 100);
+
+    // THEN it reports genuinely inconsistent
+    expect(actualResult).toContain('genuinely inconsistent');
+    expect(actualResult).toContain('environment stability');
+  });
+
+  test("should report genuine inconsistency when below target with POOR CV and null MAD", () => {
+    // GIVEN per-operation variance is high with unknown dispersion pattern, and throughput below target
+    const givenStats = buildThroughputStats({relativeMarginOfError: 5, coefficientOfVariation: 0.5, mad: null});
+
+    // WHEN interpreting throughput results
+    const actualResult = generateThroughputInterpretation(givenStats, 50, 100);
+
+    // THEN it reports genuinely inconsistent
+    expect(actualResult).toContain('genuinely inconsistent');
+  });
+
+  test("should report code is too slow when below target with GOOD RME and GOOD CV", () => {
+    // GIVEN per-operation stats are precise and consistent, but throughput is below target
+    const givenStats = buildThroughputStats({relativeMarginOfError: 5, coefficientOfVariation: 0.05});
+
+    // WHEN interpreting throughput results
+    const actualResult = generateThroughputInterpretation(givenStats, 50, 100);
+
+    // THEN it reports code is too slow
+    expect(actualResult).toContain('consistently');
+    expect(actualResult).toContain('below target');
+    expect(actualResult).toContain('too slow');
+  });
+
+  test("should handle null RME when mean is near zero", () => {
+    // GIVEN per-operation timing mean is near zero making relative metrics unavailable
+    const givenStats = buildThroughputStats({relativeMarginOfError: null, coefficientOfVariation: null});
+
+    // WHEN interpreting throughput results
+    const actualResult = generateThroughputInterpretation(givenStats, 200, 100);
+
+    // THEN it reports near-zero mean
+    expect(actualResult).toContain('near zero');
+  });
+
+  test("should handle null CI when insufficient data", () => {
+    // GIVEN per-operation timing has insufficient data for confidence intervals
+    const givenStats = buildThroughputStats({confidenceInterval: null});
+
+    // WHEN interpreting throughput results
+    const actualResult = generateThroughputInterpretation(givenStats, 200, 100);
+
+    // THEN it reports insufficient data
+    expect(actualResult).toContain('insufficient data');
+  });
+
+  test("should include error info note when errors present", () => {
+    // GIVEN per-operation stats are precise and consistent, with some operations excluded due to errors
+    const givenStats = buildThroughputStats({relativeMarginOfError: 5, coefficientOfVariation: 0.05});
+    const givenErrorInfo = {errorCount: 3, totalIterations: 100, allowedRate: 0.1};
+
+    // WHEN interpreting throughput results with error info
+    const actualResult = generateThroughputInterpretation(givenStats, 200, 100, givenErrorInfo);
+
+    // THEN it includes the error exclusion note
+    expect(actualResult).toContain('3 of 100 operations failed');
+    expect(actualResult).toContain('stats reflect successful ops only');
+  });
+
+  test("should report above target at exact boundary (100%)", () => {
+    // GIVEN per-operation stats are precise and consistent, with throughput exactly at target
+    const givenStats = buildThroughputStats({relativeMarginOfError: 5, coefficientOfVariation: 0.05});
+
+    // WHEN interpreting throughput at the exact target boundary
+    const actualResult = generateThroughputInterpretation(givenStats, 100, 100);
+
+    // THEN it reports target met (since actualOps >= expectedOps)
+    expect(actualResult).toContain('throughput target met');
   });
 });

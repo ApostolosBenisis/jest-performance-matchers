@@ -8,6 +8,7 @@ import {
   classifySampleAdequacy,
   generateInterpretation,
   generateComparisonInterpretation,
+  generateThroughputInterpretation,
   formatTag,
   formatPValue,
 } from "./diagnostics";
@@ -271,4 +272,164 @@ export function processComparativeResults(opts: ComparativeResultsOptions): { me
     pass: false,
     message: () => `expected Function A to be faster than Function B,\nbut no statistically significant difference was found (p=${tTest.pValue.toFixed(4)} >= α=${alpha.toFixed(2)})\n\n${statsBlock}`,
   };
+}
+
+export interface ThroughputResultsOptions {
+  durations: number[];
+  totalOps: number;
+  errorCount: number;
+  allowedErrorRate: number;
+  expectedOpsPerSecond: number;
+  duration: number;
+  setupTeardownActive: boolean;
+  removeOutliersEnabled: boolean;
+}
+
+export function processThroughputResults(opts: ThroughputResultsOptions): { message: () => string; pass: boolean } {
+  const {durations, totalOps, errorCount, allowedErrorRate, expectedOpsPerSecond, duration, setupTeardownActive, removeOutliersEnabled} = opts;
+
+  if (durations.length === 0) {
+    return {
+      pass: false,
+      message: () => `all ${totalOps} operations failed (100% error rate, allowed ${(allowedErrorRate * 100).toFixed(1)}%)`,
+    };
+  }
+
+  /* istanbul ignore next -- defensive guard: totalOps is always > 0 when durations is non-empty */
+  const actualErrorRate = totalOps > 0 ? errorCount / totalOps : 0;
+  if (actualErrorRate > allowedErrorRate) {
+    return {
+      pass: false,
+      message: () => `error rate ${errorCount}/${totalOps} (${(actualErrorRate * 100).toFixed(1)}%) exceeds allowed ${(allowedErrorRate * 100).toFixed(1)}%`,
+    };
+  }
+
+  const effectiveDurations = removeOutliersEnabled ? removeOutliers(durations) : durations;
+  /* istanbul ignore next -- defensive guard: Tukey's fences cannot remove all points from a homogeneous dataset */
+  if (effectiveDurations.length === 0) {
+    return {
+      pass: false,
+      message: () => `all ${durations.length} successful operations were removed as outliers after error exclusion`,
+    };
+  }
+
+  const stats = calcStats(effectiveDurations);
+  // Use pre-removal count for throughput: outlier removal cleans per-op stats, not the actual ops completed
+  const actualOpsPerSecond = (durations.length / duration) * 1000;
+  const pass = actualOpsPerSecond >= expectedOpsPerSecond;
+  const pctOfTarget = (actualOpsPerSecond / expectedOpsPerSecond) * 100;
+
+  const errorInfo: ErrorInfo | undefined = errorCount > 0 ? {errorCount, totalIterations: totalOps, allowedRate: allowedErrorRate} : undefined;
+  const statsBlock = formatThroughputStatsBlock({stats, durations: effectiveDurations, actualOpsPerSecond, expectedOpsPerSecond, duration, totalOps: durations.length, setupTeardownActive, errorInfo});
+
+  if (pass) {
+    return {
+      pass: true,
+      message: () => `expected function NOT to achieve at least ${printExpected(Math.round(expectedOpsPerSecond))} ops/sec,\nbut it achieved ${printReceived(Math.round(actualOpsPerSecond))} ops/sec (${pctOfTarget.toFixed(1)}% of target)\n\n${statsBlock}`,
+    };
+  }
+  return {
+    pass: false,
+    message: () => `expected function to achieve at least ${printExpected(Math.round(expectedOpsPerSecond))} ops/sec,\ninstead it achieved ${printReceived(Math.round(actualOpsPerSecond))} ops/sec (${pctOfTarget.toFixed(1)}% of target)\n\n${statsBlock}`,
+  };
+}
+
+interface ThroughputStatsBlockOptions {
+  stats: Stats;
+  durations: number[];
+  actualOpsPerSecond: number;
+  expectedOpsPerSecond: number;
+  duration: number;
+  totalOps: number;
+  setupTeardownActive: boolean;
+  errorInfo?: ErrorInfo;
+}
+
+function formatThroughputStatsBlock(opts: ThroughputStatsBlockOptions): string {
+  const {stats, durations, actualOpsPerSecond, expectedOpsPerSecond, duration, totalOps, setupTeardownActive, errorInfo} = opts;
+
+  // Throughput CI: invert per-op timing CI bounds (inversion flips upper/lower)
+  let throughputCIText: string;
+  if (stats.confidenceInterval === null) {
+    throughputCIText = '  CI 95%: N/A (insufficient data)';
+  } else {
+    const [ciLower, ciUpper] = stats.confidenceInterval;
+    if (ciLower <= 0) {
+      throughputCIText = '  CI 95%: N/A (per-op CI lower bound is non-positive)';
+    } else {
+      const throughputLower = 1000 / ciUpper;
+      const throughputUpper = 1000 / ciLower;
+      throughputCIText = `  CI 95%: [${Math.round(throughputLower)}, ${Math.round(throughputUpper)}] ops/sec`;
+    }
+  }
+
+  // Target comparison
+  const diff = actualOpsPerSecond - expectedOpsPerSecond;
+  const absDiff = Math.abs(diff);
+  const pctDiff = (absDiff / expectedOpsPerSecond) * 100;
+  const targetText = diff >= 0
+    ? `  Target: ${Math.round(expectedOpsPerSecond)} ops/sec — surplus of ${Math.round(absDiff)} ops/sec (${pctDiff.toFixed(1)}%)`
+    : `  Target: ${Math.round(expectedOpsPerSecond)} ops/sec — shortfall of ${Math.round(absDiff)} ops/sec (${pctDiff.toFixed(1)}%)`;
+
+  // Per-op timing section (reuse classification primitives)
+  const rmeTag = classifyRME(stats.relativeMarginOfError);
+  const cvTag = classifyCV(stats.coefficientOfVariation);
+  const madTag = classifyMAD(stats.mad, stats.median);
+
+  const ciText = stats.confidenceInterval === null
+    ? 'N/A (insufficient data)'
+    : `[${stats.confidenceInterval[0].toFixed(2)}, ${stats.confidenceInterval[1].toFixed(2)}]ms`;
+  const rmeText = stats.relativeMarginOfError === null || rmeTag === null
+    ? 'N/A'
+    : `${stats.relativeMarginOfError.toFixed(2)}% [${formatTag(rmeTag)}]`;
+  const cvText = stats.coefficientOfVariation === null || cvTag === null
+    ? 'N/A'
+    : `${stats.coefficientOfVariation.toFixed(2)} [${formatTag(cvTag)}]`;
+
+  const p25 = calcQuantile(25, durations);
+  const p50 = stats.median;
+  const p75 = calcQuantile(75, durations);
+  const p90 = calcQuantile(90, durations);
+
+  const shapeDiag = calcShapeDiagnostics(durations, stats.skewness, stats.stddev);
+  const skewnessText = stats.skewness === null ? 'N/A' : stats.skewness.toFixed(2);
+
+  let madText: string;
+  if (stats.mad === null) {
+    madText = 'N/A';
+  } else {
+    /* istanbul ignore next -- defensive guard: madTag is null only when median is 0, which implies mad is 0, not a realistic throughput scenario */
+    const madTagSuffix = madTag === null ? '' : ` [${formatTag(madTag)}]`;
+    madText = `${stats.mad.toFixed(2)}ms${madTagSuffix}`;
+  }
+
+  const interpretation = generateThroughputInterpretation(stats, actualOpsPerSecond, expectedOpsPerSecond, errorInfo);
+
+  const lines = [
+    `Throughput: ${Math.round(actualOpsPerSecond)} ops/sec over ${Math.round(duration)}ms (${totalOps} total operations)`,
+    throughputCIText,
+    targetText,
+    '',
+    `Per-operation timing (n=${stats.n}${setupTeardownActive ? ', setup/teardown active' : ''}): mean=${formatStatValue(stats.mean)}ms, median=${formatStatValue(stats.median)}ms, stddev=${formatStatValue(stats.stddev)}ms, MAD=${madText}`,
+    `  CI 95%: ${ciText} | RME: ${rmeText} | CV: ${cvText}`,
+    `  Distribution: min=${formatStatValue(stats.min)}ms | P25=${formatStatValue(p25)}ms | P50=${formatStatValue(p50)}ms | P75=${formatStatValue(p75)}ms | P90=${formatStatValue(p90)}ms | max=${formatStatValue(stats.max)}ms`,
+    `  Shape: ${shapeDiag.label} (skewness=${skewnessText}) | ${shapeDiag.sparkline}`,
+    '',
+    `Interpretation: ${interpretation}`,
+  ];
+
+  if (errorInfo !== undefined && errorInfo.errorCount > 0) {
+    const actualRate = (errorInfo.errorCount / errorInfo.totalIterations * 100).toFixed(1);
+    const allowedRate = (errorInfo.allowedRate * 100).toFixed(1);
+    lines.push(`Error rate: ${errorInfo.errorCount}/${errorInfo.totalIterations} (${actualRate}%) [within ${allowedRate}% tolerance]`);
+  }
+
+  if (stats.warnings.length > 0) {
+    lines.push('Warnings:');
+    for (const warning of stats.warnings) {
+      lines.push(`  - ${warning}`);
+    }
+  }
+
+  return lines.join('\n');
 }
