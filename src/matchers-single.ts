@@ -39,7 +39,7 @@ export function toCompleteWithin(callback: (state: any) => unknown, expectedDura
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- expect.extend erases generics at runtime
 export async function toResolveWithin(promise: (state: any) => Promise<unknown>, expectedDurationInMilliseconds: number, options?: {
-  setup?: () => unknown | Promise<unknown>,
+  setup?: () => unknown,
   teardown?: (state: unknown) => void | Promise<void>,
 }) {
   validateCallback(promise);

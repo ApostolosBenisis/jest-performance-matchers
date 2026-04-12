@@ -146,9 +146,9 @@ export async function toResolveFasterThan(promiseA: AsyncCallback, promiseB: Asy
   warmup?: number,
   confidence?: number,
   outliers?: 'remove' | 'keep',
-  setup?: () => unknown | Promise<unknown>,
+  setup?: () => unknown,
   teardown?: (suiteState: unknown) => void | Promise<void>,
-  setupEach?: (suiteState: unknown) => unknown | Promise<unknown>,
+  setupEach?: (suiteState: unknown) => unknown,
   teardownEach?: (suiteState: unknown, iterState: unknown) => void | Promise<void>,
   allowedErrorRate?: number,
 }) {

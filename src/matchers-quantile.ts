@@ -79,9 +79,9 @@ export async function toResolveWithinQuantile(promise: (...args: any[]) => Promi
   quantile: number,
   warmup?: number,
   outliers?: 'remove' | 'keep',
-  setup?: () => unknown | Promise<unknown>,
+  setup?: () => unknown,
   teardown?: (suiteState: unknown) => void | Promise<void>,
-  setupEach?: (suiteState: unknown) => unknown | Promise<unknown>,
+  setupEach?: (suiteState: unknown) => unknown,
   teardownEach?: (suiteState: unknown, iterState: unknown) => void | Promise<void>,
   allowedErrorRate?: number,
 }) {
