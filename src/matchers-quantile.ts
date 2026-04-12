@@ -1,44 +1,6 @@
-import {nowInMillis} from "./timing";
 import {validateCallback, validateDuration, validateQuantileOptions} from "./validators";
 import {processQuantileResults} from "./helpers";
-
-interface QuantileHooks {
-  setup?: () => unknown;
-  teardown?: (suiteState: unknown) => void;
-  setupEach?: (suiteState: unknown) => unknown;
-  teardownEach?: (suiteState: unknown, iterState: unknown) => void;
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- expect.extend erases generics at runtime
-type SyncCallback = (...args: any[]) => unknown;
-
-function warmupSync(callback: SyncCallback, warmupCount: number, suiteState: unknown, hooks: QuantileHooks): void {
-  for (let i = 0; i < warmupCount; i++) {
-    const iterState = hooks.setupEach ? hooks.setupEach(suiteState) : undefined;
-    try {
-      callback(suiteState, iterState);
-    } finally {
-      if (hooks.teardownEach) hooks.teardownEach(suiteState, iterState);
-    }
-  }
-}
-
-function measureSync(callback: SyncCallback, suiteState: unknown, durations: number[], hooks: QuantileHooks, allowedErrorRate: number): number {
-  let errorCount = 0;
-  const iterState = hooks.setupEach ? hooks.setupEach(suiteState) : undefined;
-  try {
-    const t0 = nowInMillis();
-    callback(suiteState, iterState);
-    const t1 = nowInMillis();
-    durations.push(t1 - t0);
-  } catch (e) {
-    if (allowedErrorRate === 0) throw e;
-    errorCount = 1;
-  } finally {
-    if (hooks.teardownEach) hooks.teardownEach(suiteState, iterState);
-  }
-  return errorCount;
-}
+import {SyncHooks, AsyncHooks, SyncCallback, AsyncCallback, measureSync, measureAsync, warmupSync, warmupAsync} from "./hooks";
 
 /**
  * Assert that the synchronous code executed for (I) times, runs (Q)% the time within the given duration
@@ -46,8 +8,7 @@ function measureSync(callback: SyncCallback, suiteState: unknown, durations: num
  * @param expectedDurationInMilliseconds The expected duration in milliseconds
  * @param options Iteration count, quantile threshold, and optional setup/teardown hooks
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- expect.extend erases generics at runtime
-export function toCompleteWithinQuantile(callback: (...args: any[]) => unknown, expectedDurationInMilliseconds: number, options: {
+export function toCompleteWithinQuantile(callback: SyncCallback, expectedDurationInMilliseconds: number, options: {
   iterations: number,
   quantile: number,
   warmup?: number,
@@ -64,7 +25,7 @@ export function toCompleteWithinQuantile(callback: (...args: any[]) => unknown, 
 
   const count = options.iterations;
   const quantile = options.quantile;
-  const hooks: QuantileHooks = options;
+  const hooks: SyncHooks = options;
   const allowedErrorRate = options.allowedErrorRate ?? 0;
   const suiteState = hooks.setup ? hooks.setup() : undefined;
 
@@ -84,52 +45,13 @@ export function toCompleteWithinQuantile(callback: (...args: any[]) => unknown, 
   }
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- expect.extend erases generics at runtime
-type AsyncCallback = (...args: any[]) => Promise<unknown>;
-
-interface AsyncQuantileHooks {
-  setup?: () => unknown;
-  teardown?: (suiteState: unknown) => void | Promise<void>;
-  setupEach?: (suiteState: unknown) => unknown;
-  teardownEach?: (suiteState: unknown, iterState: unknown) => void | Promise<void>;
-}
-
-async function warmupAsync(callback: AsyncCallback, warmupCount: number, suiteState: unknown, hooks: AsyncQuantileHooks): Promise<void> {
-  for (let i = 0; i < warmupCount; i++) {
-    const iterState = hooks.setupEach ? await hooks.setupEach(suiteState) : undefined;
-    try {
-      await callback(suiteState, iterState);
-    } finally {
-      if (hooks.teardownEach) await hooks.teardownEach(suiteState, iterState);
-    }
-  }
-}
-
-async function measureAsync(callback: AsyncCallback, suiteState: unknown, durations: number[], hooks: AsyncQuantileHooks, allowedErrorRate: number): Promise<number> {
-  let errorCount = 0;
-  const iterState = hooks.setupEach ? await hooks.setupEach(suiteState) : undefined;
-  try {
-    const t0 = nowInMillis();
-    await callback(suiteState, iterState);
-    const t1 = nowInMillis();
-    durations.push(t1 - t0);
-  } catch (e) {
-    if (allowedErrorRate === 0) throw e;
-    errorCount = 1;
-  } finally {
-    if (hooks.teardownEach) await hooks.teardownEach(suiteState, iterState);
-  }
-  return errorCount;
-}
-
 /**
  * Assert that the asynchronous code executed for (I) times, resolves (Q)% the time within the given duration
  * @param promise The promise to execute and measure
  * @param expectedDurationInMilliseconds The expected duration in milliseconds
  * @param options Iteration count, quantile threshold, and optional setup/teardown hooks
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- expect.extend erases generics at runtime
-export async function toResolveWithinQuantile(promise: (...args: any[]) => Promise<unknown>, expectedDurationInMilliseconds: number, options: {
+export async function toResolveWithinQuantile(promise: AsyncCallback, expectedDurationInMilliseconds: number, options: {
   iterations: number,
   quantile: number,
   warmup?: number,
@@ -146,7 +68,7 @@ export async function toResolveWithinQuantile(promise: (...args: any[]) => Promi
 
   const count = options.iterations;
   const quantile = options.quantile;
-  const hooks: AsyncQuantileHooks = options;
+  const hooks: AsyncHooks = options;
   const allowedErrorRate = options.allowedErrorRate ?? 0;
   const suiteState = hooks.setup ? await hooks.setup() : undefined;
 
