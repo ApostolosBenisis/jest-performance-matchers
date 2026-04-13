@@ -1,13 +1,6 @@
 import {validateCallback, validateComparativeOptions} from "./validators";
 import {processComparativeResults} from "./helpers";
-import {SyncHooks, AsyncHooks, SyncCallback, AsyncCallback, runSyncWithHooks, runAsyncWithHooks, measureSync, measureAsync} from "./hooks";
-
-function warmupSync(callbackA: SyncCallback, callbackB: SyncCallback, warmupCount: number, suiteState: unknown, hooks: SyncHooks): void {
-  for (let i = 0; i < warmupCount; i++) {
-    runSyncWithHooks(callbackA, suiteState, hooks);
-    runSyncWithHooks(callbackB, suiteState, hooks);
-  }
-}
+import {SyncHooks, AsyncHooks, SyncCallback, AsyncCallback, measureSync, measureAsync, warmupSyncInterleaved, warmupAsyncInterleaved} from "./hooks";
 
 /**
  * Assert that synchronous function A is statistically faster than function B
@@ -37,7 +30,7 @@ export function toBeFasterThan(callbackA: SyncCallback, callbackB: SyncCallback,
   const suiteState = hooks.setup ? hooks.setup() : undefined;
 
   try {
-    warmupSync(callbackA, callbackB, options.warmup ?? 0, suiteState, hooks);
+    warmupSyncInterleaved(callbackA, callbackB, options.warmup ?? 0, suiteState, hooks);
 
     const durationsA: number[] = [];
     const durationsB: number[] = [];
@@ -58,13 +51,6 @@ export function toBeFasterThan(callbackA: SyncCallback, callbackB: SyncCallback,
     });
   } finally {
     if (hooks.teardown) hooks.teardown(suiteState);
-  }
-}
-
-async function warmupAsync(callbackA: AsyncCallback, callbackB: AsyncCallback, warmupCount: number, suiteState: unknown, hooks: AsyncHooks): Promise<void> {
-  for (let i = 0; i < warmupCount; i++) {
-    await runAsyncWithHooks(callbackA, suiteState, hooks);
-    await runAsyncWithHooks(callbackB, suiteState, hooks);
   }
 }
 
@@ -96,7 +82,7 @@ export async function toResolveFasterThan(promiseA: AsyncCallback, promiseB: Asy
   const suiteState = hooks.setup ? await hooks.setup() : undefined;
 
   try {
-    await warmupAsync(promiseA, promiseB, options.warmup ?? 0, suiteState, hooks);
+    await warmupAsyncInterleaved(promiseA, promiseB, options.warmup ?? 0, suiteState, hooks);
 
     const durationsA: number[] = [];
     const durationsB: number[] = [];

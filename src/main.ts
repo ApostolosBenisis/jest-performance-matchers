@@ -3,6 +3,7 @@ import {toCompleteWithin, toResolveWithin} from './matchers-single';
 import {toCompleteWithinQuantile, toResolveWithinQuantile} from './matchers-quantile';
 import {toBeFasterThan, toResolveFasterThan} from './matchers-comparative';
 import {toAchieveOpsPerSecond, toResolveAtOpsPerSecond} from './matchers-throughput';
+import {toHaveHigherThroughputThan, toResolveWithHigherThroughputThan} from './matchers-comparative-throughput';
 
 expect.extend({
   toCompleteWithin,
@@ -13,6 +14,8 @@ expect.extend({
   toResolveFasterThan,
   toAchieveOpsPerSecond,
   toResolveAtOpsPerSecond,
+  toHaveHigherThroughputThan,
+  toResolveWithHigherThroughputThan,
 });
 
 declare global {
@@ -95,6 +98,32 @@ declare global {
       toResolveAtOpsPerSecond<T = void, U = void>(expectedOpsPerSecond: number, options: {
         duration: number,
         warmup?: number,
+        outliers?: 'remove' | 'keep',
+        setup?: () => T | Promise<T>,
+        teardown?: (suiteState: T) => void | Promise<void>,
+        setupEach?: (suiteState: T) => U | Promise<U>,
+        teardownEach?: (suiteState: T, iterState: U) => void | Promise<void>,
+        allowedErrorRate?: number,
+        logDiagnostics?: 'INFO' | 'WARN' | 'FAIL',
+      }): Promise<R>;
+
+      toHaveHigherThroughputThan<T = void, U = void>(comparisonFn: (...args: unknown[]) => unknown, options: {
+        duration: number,
+        warmup?: number,
+        confidence?: number,
+        outliers?: 'remove' | 'keep',
+        setup?: () => T,
+        teardown?: (suiteState: T) => void,
+        setupEach?: (suiteState: T) => U,
+        teardownEach?: (suiteState: T, iterState: U) => void,
+        allowedErrorRate?: number,
+        logDiagnostics?: 'INFO' | 'WARN' | 'FAIL',
+      }): R;
+
+      toResolveWithHigherThroughputThan<T = void, U = void>(comparisonFn: (...args: unknown[]) => Promise<unknown>, options: {
+        duration: number,
+        warmup?: number,
+        confidence?: number,
         outliers?: 'remove' | 'keep',
         setup?: () => T | Promise<T>,
         teardown?: (suiteState: T) => void | Promise<void>,

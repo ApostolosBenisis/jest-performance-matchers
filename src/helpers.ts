@@ -9,9 +9,11 @@ import {
   generateInterpretation,
   generateComparisonInterpretation,
   generateThroughputInterpretation,
+  generateComparativeThroughputInterpretation,
   hasWarningConditions,
   formatTag,
   formatPValue,
+  Tag,
 } from "./diagnostics";
 import {formatMs} from "./format";
 export {formatMs} from "./format";
@@ -42,19 +44,86 @@ export function formatStatValue(value: number | null): string {
   return value === null ? 'N/A' : formatMs(value);
 }
 
+/** Append the shared error-rate line and warnings list to a stats block's lines array. */
+function appendErrorInfoAndWarnings(lines: string[], warnings: string[], errorInfo?: ErrorInfo): void {
+  if (errorInfo !== undefined && errorInfo.errorCount > 0) {
+    const actualRate = (errorInfo.errorCount / errorInfo.totalIterations * 100).toFixed(1);
+    const allowedRate = (errorInfo.allowedRate * 100).toFixed(1);
+    lines.push(`Error rate: ${errorInfo.errorCount}/${errorInfo.totalIterations} (${actualRate}%) [within ${allowedRate}% tolerance]`);
+  }
+
+  if (warnings.length > 0) {
+    lines.push('Warnings:');
+    for (const warning of warnings) {
+      lines.push(`  - ${warning}`);
+    }
+  }
+}
+
+/** Format the CI value (without prefix). Returns 'N/A (insufficient data)' or '[lower, upper]ms'. */
+function formatCIValue(ci: [number, number] | null): string {
+  if (ci === null) return 'N/A (insufficient data)';
+  return `[${formatMs(ci[0])}, ${formatMs(ci[1])}]ms`;
+}
+
+/** Format the RME value (without prefix). Returns 'N/A' or 'X.XX% [TAG]'. */
+function formatRMEValue(rme: number | null, tag: Tag | null): string {
+  if (rme === null || tag === null) return 'N/A';
+  return `${rme.toFixed(2)}% [${formatTag(tag)}]`;
+}
+
+/** Format the CV value (without prefix). Returns 'N/A' or 'X.XX [TAG]'. */
+function formatCVValue(cv: number | null, tag: Tag | null): string {
+  if (cv === null || tag === null) return 'N/A';
+  return `${cv.toFixed(2)} [${formatTag(tag)}]`;
+}
+
+type EffectiveDurationsResult =
+  | { ok: true; effective: number[] }
+  | { ok: false; message: string };
+
+/** Apply outlier removal and verify minimum sample size (n >= 2) for one function in a comparative matcher. */
+function prepareEffectiveDurations(
+  durations: number[], removeOutliersEnabled: boolean, fnLabel: 'Function A' | 'Function B', noun: 'iterations' | 'operations',
+): EffectiveDurationsResult {
+  const effective = removeOutliersEnabled ? removeOutliers(durations) : durations;
+  /* istanbul ignore next -- defensive guard: Tukey's fences cannot remove all points from a homogeneous dataset */
+  if (effective.length === 0) {
+    return {ok: false, message: `${fnLabel}: all ${durations.length} successful ${noun} were removed as outliers`};
+  }
+  if (effective.length < 2) {
+    return {ok: false, message: `${fnLabel}: insufficient data after processing (n=${effective.length}); Welch's t-test requires at least 2 data points per function`};
+  }
+  return {ok: true, effective};
+}
+
+/** Build the pass/fail result with formatted message for both comparative matcher families. */
+function buildComparativeResult(
+  pass: boolean, alpha: number, pValue: number, statsBlock: string,
+  passHeadline: string, failHeadline: string,
+): { pass: boolean; message: () => string } {
+  const formattedP = formatPValue(pValue);
+  if (pass) {
+    return {
+      pass: true,
+      message: () => `${passHeadline} (p=${formattedP} < α=${alpha.toFixed(2)})\n\n${statsBlock}`,
+    };
+  }
+  return {
+    pass: false,
+    message: () => `${failHeadline} (p=${formattedP} >= α=${alpha.toFixed(2)})\n\n${statsBlock}`,
+  };
+}
+
 export function formatStatsBlock(stats: Stats, durations: number[], expectedDuration?: number, setupTeardownActive?: boolean, errorInfo?: ErrorInfo): string {
   const rmeTag = classifyRME(stats.relativeMarginOfError);
   const cvTag = classifyCV(stats.coefficientOfVariation);
 
   const ciText = stats.confidenceInterval === null
     ? 'Confidence Interval (CI): N/A (insufficient data)'
-    : `Confidence Interval (CI): 95% [${formatMs(stats.confidenceInterval[0])}, ${formatMs(stats.confidenceInterval[1])}]ms`;
-  const rmeText = stats.relativeMarginOfError === null || rmeTag === null
-    ? 'Relative Margin of Error (RME): N/A'
-    : `Relative Margin of Error (RME): ${stats.relativeMarginOfError.toFixed(2)}% [${formatTag(rmeTag)}]`;
-  const cvText = stats.coefficientOfVariation === null || cvTag === null
-    ? 'Coefficient of Variation (CV): N/A'
-    : `Coefficient of Variation (CV): ${stats.coefficientOfVariation.toFixed(2)} [${formatTag(cvTag)}]`;
+    : `Confidence Interval (CI): 95% ${formatCIValue(stats.confidenceInterval)}`;
+  const rmeText = `Relative Margin of Error (RME): ${formatRMEValue(stats.relativeMarginOfError, rmeTag)}`;
+  const cvText = `Coefficient of Variation (CV): ${formatCVValue(stats.coefficientOfVariation, cvTag)}`;
 
   const p25 = calcQuantile(25, durations);
   const p50 = stats.median;
@@ -85,18 +154,7 @@ export function formatStatsBlock(stats: Stats, durations: number[], expectedDura
     `Interpretation: ${generateInterpretation(stats, expectedDuration, errorInfo)}`,
   ];
 
-  if (errorInfo !== undefined && errorInfo.errorCount > 0) {
-    const actualRate = (errorInfo.errorCount / errorInfo.totalIterations * 100).toFixed(1);
-    const allowedRate = (errorInfo.allowedRate * 100).toFixed(1);
-    lines.push(`Error rate: ${errorInfo.errorCount}/${errorInfo.totalIterations} (${actualRate}%) [within ${allowedRate}% tolerance]`);
-  }
-
-  if (stats.warnings.length > 0) {
-    lines.push('Warnings:');
-    for (const warning of stats.warnings) {
-      lines.push(`  - ${warning}`);
-    }
-  }
+  appendErrorInfoAndWarnings(lines, stats.warnings, errorInfo);
 
   return lines.join('\n');
 }
@@ -255,28 +313,14 @@ export function processComparativeResults(opts: ComparativeResultsOptions): { me
     return {pass: false, message: () => `Function B: error rate ${errorCountB}/${count} (${(errorRateB * 100).toFixed(1)}%) exceeds allowed ${(allowedErrorRate * 100).toFixed(1)}%`};
   }
 
-  // Remove outliers if enabled
-  const effectiveA = removeOutliersEnabled ? removeOutliers(durationsA) : durationsA;
-  /* istanbul ignore next -- defensive guard: Tukey's fences cannot remove all points from a homogeneous dataset */
-  if (effectiveA.length === 0) {
-    return {pass: false, message: () => `Function A: all ${durationsA.length} successful iterations were removed as outliers`};
-  }
-  const effectiveB = removeOutliersEnabled ? removeOutliers(durationsB) : durationsB;
-  /* istanbul ignore next -- defensive guard: Tukey's fences cannot remove all points from a homogeneous dataset */
-  if (effectiveB.length === 0) {
-    return {pass: false, message: () => `Function B: all ${durationsB.length} successful iterations were removed as outliers`};
-  }
+  // Remove outliers if enabled and verify minimum sample size for t-test
+  const checkA = prepareEffectiveDurations(durationsA, removeOutliersEnabled, 'Function A', 'iterations');
+  if (!checkA.ok) return {pass: false, message: () => checkA.message};
+  const checkB = prepareEffectiveDurations(durationsB, removeOutliersEnabled, 'Function B', 'iterations');
+  if (!checkB.ok) return {pass: false, message: () => checkB.message};
 
-  // Check minimum sample size for t-test
-  if (effectiveA.length < 2) {
-    return {pass: false, message: () => `Function A: insufficient data after processing (n=${effectiveA.length}); Welch's t-test requires at least 2 data points per function`};
-  }
-  if (effectiveB.length < 2) {
-    return {pass: false, message: () => `Function B: insufficient data after processing (n=${effectiveB.length}); Welch's t-test requires at least 2 data points per function`};
-  }
-
-  const statsA = calcStats(effectiveA);
-  const statsB = calcStats(effectiveB);
+  const statsA = calcStats(checkA.effective);
+  const statsB = calcStats(checkB.effective);
   const tTest = welchTTest(statsA, statsB, confidence);
   const alpha = 1 - confidence;
   const pass = tTest.pValue < alpha;
@@ -284,21 +328,16 @@ export function processComparativeResults(opts: ComparativeResultsOptions): { me
   const errorInfoA: ErrorInfo | undefined = errorCountA > 0 ? {errorCount: errorCountA, totalIterations: count, allowedRate: allowedErrorRate} : undefined;
   const errorInfoB: ErrorInfo | undefined = errorCountB > 0 ? {errorCount: errorCountB, totalIterations: count, allowedRate: allowedErrorRate} : undefined;
 
-  const statsBlock = formatComparativeStatsBlock({statsA, statsB, durationsA: effectiveA, durationsB: effectiveB, tTest, confidence, setupTeardownActive, errorInfoA, errorInfoB});
+  const statsBlock = formatComparativeStatsBlock({statsA, statsB, durationsA: checkA.effective, durationsB: checkB.effective, tTest, confidence, setupTeardownActive, errorInfoA, errorInfoB});
 
   const warnings = hasWarningConditions(statsA, undefined, errorInfoA) || hasWarningConditions(statsB, undefined, errorInfoB);
   logDiagnosticsIfNeeded(pass, statsBlock, opts.logDiagnostics, warnings);
 
-  if (pass) {
-    return {
-      pass: true,
-      message: () => `expected Function A NOT to be faster than Function B,\nbut A is statistically significantly faster (p=${tTest.pValue < 0.0001 ? '<0.0001' : tTest.pValue.toFixed(4)} < α=${alpha.toFixed(2)})\n\n${statsBlock}`,
-    };
-  }
-  return {
-    pass: false,
-    message: () => `expected Function A to be faster than Function B,\nbut no statistically significant difference was found (p=${tTest.pValue.toFixed(4)} >= α=${alpha.toFixed(2)})\n\n${statsBlock}`,
-  };
+  return buildComparativeResult(
+    pass, alpha, tTest.pValue, statsBlock,
+    'expected Function A NOT to be faster than Function B,\nbut A is statistically significantly faster',
+    'expected Function A to be faster than Function B,\nbut no statistically significant difference was found',
+  );
 }
 
 export interface ThroughputResultsOptions {
@@ -375,7 +414,7 @@ interface ThroughputStatsBlockOptions {
   errorInfo?: ErrorInfo;
 }
 
-function formatThroughputCI(confidenceInterval: [number, number] | null): string {
+export function formatThroughputCI(confidenceInterval: [number, number] | null): string {
   if (confidenceInterval === null) {
     return '  CI 95%: N/A (insufficient data)';
   }
@@ -396,20 +435,14 @@ function formatTargetComparison(actualOpsPerSecond: number, expectedOpsPerSecond
   return `  Target: ${Math.round(expectedOpsPerSecond)} ops/sec — ${label} of ${Math.round(absDiff)} ops/sec (${pctDiff.toFixed(1)}%)`;
 }
 
-function formatPerOpTimingSection(stats: Stats, durations: number[], setupTeardownActive: boolean): string[] {
+export function formatPerOpTimingSection(stats: Stats, durations: number[], setupTeardownActive: boolean): string[] {
   const rmeTag = classifyRME(stats.relativeMarginOfError);
   const cvTag = classifyCV(stats.coefficientOfVariation);
   const madTag = classifyMAD(stats.mad, stats.median);
 
-  const ciText = stats.confidenceInterval === null
-    ? 'N/A (insufficient data)'
-    : `[${formatMs(stats.confidenceInterval[0])}, ${formatMs(stats.confidenceInterval[1])}]ms`;
-  const rmeText = stats.relativeMarginOfError === null || rmeTag === null
-    ? 'N/A'
-    : `${stats.relativeMarginOfError.toFixed(2)}% [${formatTag(rmeTag)}]`;
-  const cvText = stats.coefficientOfVariation === null || cvTag === null
-    ? 'N/A'
-    : `${stats.coefficientOfVariation.toFixed(2)} [${formatTag(cvTag)}]`;
+  const ciText = formatCIValue(stats.confidenceInterval);
+  const rmeText = formatRMEValue(stats.relativeMarginOfError, rmeTag);
+  const cvText = formatCVValue(stats.coefficientOfVariation, cvTag);
 
   const p25 = calcQuantile(25, durations);
   const p50 = stats.median;
@@ -451,18 +484,138 @@ function formatThroughputStatsBlock(opts: ThroughputStatsBlockOptions): string {
     `Interpretation: ${interpretation}`,
   ];
 
-  if (errorInfo !== undefined && errorInfo.errorCount > 0) {
-    const actualRate = (errorInfo.errorCount / errorInfo.totalIterations * 100).toFixed(1);
-    const allowedRate = (errorInfo.allowedRate * 100).toFixed(1);
-    lines.push(`Error rate: ${errorInfo.errorCount}/${errorInfo.totalIterations} (${actualRate}%) [within ${allowedRate}% tolerance]`);
-  }
-
-  if (stats.warnings.length > 0) {
-    lines.push('Warnings:');
-    for (const warning of stats.warnings) {
-      lines.push(`  - ${warning}`);
-    }
-  }
+  appendErrorInfoAndWarnings(lines, stats.warnings, errorInfo);
 
   return lines.join('\n');
+}
+
+function formatThroughputFunctionBlock(
+  stats: Stats, durations: number[], actualOpsPerSecond: number, totalOps: number, duration: number,
+  setupTeardownActive: boolean, errorInfo?: ErrorInfo,
+): string {
+  const lines = [
+    `Throughput: ${Math.round(actualOpsPerSecond)} ops/sec over ${Math.round(duration)}ms (${totalOps} total operations)`,
+    formatThroughputCI(stats.confidenceInterval),
+    '',
+    ...formatPerOpTimingSection(stats, durations, setupTeardownActive),
+  ];
+
+  appendErrorInfoAndWarnings(lines, stats.warnings, errorInfo);
+
+  return lines.join('\n');
+}
+
+function formatThroughputComparisonLine(actualOpsPerSecondA: number, actualOpsPerSecondB: number): string {
+  const opsDiff = Math.abs(actualOpsPerSecondA - actualOpsPerSecondB);
+  let direction: string;
+  if (actualOpsPerSecondA === actualOpsPerSecondB) {
+    direction = '(identical throughput)';
+  } else if (actualOpsPerSecondA > actualOpsPerSecondB) {
+    direction = `Function A is higher by ${Math.round(opsDiff)} ops/sec`;
+  } else {
+    direction = `Function A is lower by ${Math.round(opsDiff)} ops/sec`;
+  }
+  return `Throughput: A=${Math.round(actualOpsPerSecondA)} ops/sec, B=${Math.round(actualOpsPerSecondB)} ops/sec — ${direction}`;
+}
+
+export interface ComparativeThroughputStatsBlockOptions {
+  statsA: Stats; statsB: Stats;
+  durationsA: number[]; durationsB: number[];
+  actualOpsPerSecondA: number; actualOpsPerSecondB: number;
+  totalOpsA: number; totalOpsB: number;
+  duration: number;
+  tTest: WelchTTestResult; confidence: number;
+  setupTeardownActive: boolean;
+  errorInfoA?: ErrorInfo; errorInfoB?: ErrorInfo;
+}
+
+export function formatComparativeThroughputStatsBlock(opts: ComparativeThroughputStatsBlockOptions): string {
+  const {statsA, statsB, durationsA, durationsB, actualOpsPerSecondA, actualOpsPerSecondB, totalOpsA, totalOpsB, duration, tTest, confidence, setupTeardownActive, errorInfoA, errorInfoB} = opts;
+  const blockA = formatThroughputFunctionBlock(statsA, durationsA, actualOpsPerSecondA, totalOpsA, duration, setupTeardownActive, errorInfoA);
+  const blockB = formatThroughputFunctionBlock(statsB, durationsB, actualOpsPerSecondB, totalOpsB, duration, setupTeardownActive, errorInfoB);
+
+  const lines = [
+    '--- Function A ---',
+    blockA,
+    '',
+    '--- Function B ---',
+    blockB,
+    '',
+    '--- Comparison ---',
+    formatThroughputComparisonLine(actualOpsPerSecondA, actualOpsPerSecondB),
+    `Welch's t-test: t=${formatTStatistic(tTest.t)}, df=${tTest.df.toFixed(1)}, p=${formatPValue(tTest.pValue)} (one-sided)`,
+    `Confidence interval for per-op difference: ${(confidence * 100).toFixed(0)}% [${formatMs(tTest.confidenceInterval[0])}, ${formatMs(tTest.confidenceInterval[1])}]ms`,
+    `Result: ${generateComparativeThroughputInterpretation(statsA, statsB, tTest, confidence, actualOpsPerSecondA, actualOpsPerSecondB)}`,
+  ];
+
+  return lines.join('\n');
+}
+
+export interface ComparativeThroughputResultsOptions {
+  durationsA: number[]; durationsB: number[];
+  totalOpsA: number; totalOpsB: number;
+  errorCountA: number; errorCountB: number;
+  allowedErrorRate: number; confidence: number;
+  duration: number;
+  setupTeardownActive: boolean; removeOutliersEnabled: boolean;
+  logDiagnostics: LogDiagnostics;
+}
+
+export function processComparativeThroughputResults(opts: ComparativeThroughputResultsOptions): { message: () => string; pass: boolean } {
+  const {durationsA, durationsB, totalOpsA, totalOpsB, errorCountA, errorCountB, allowedErrorRate, confidence, duration, setupTeardownActive, removeOutliersEnabled} = opts;
+
+  // Check all-failed per function
+  if (durationsA.length === 0) {
+    return {pass: false, message: () => `Function A: all ${totalOpsA} operations failed during ${Math.round(duration)}ms window (100% error rate, allowed ${(allowedErrorRate * 100).toFixed(1)}%)`};
+  }
+  if (durationsB.length === 0) {
+    return {pass: false, message: () => `Function B: all ${totalOpsB} operations failed during ${Math.round(duration)}ms window (100% error rate, allowed ${(allowedErrorRate * 100).toFixed(1)}%)`};
+  }
+
+  // Check error rate per function (pre-outlier-removal counts)
+  /* istanbul ignore next -- defensive guard: totalOps is always > 0 when durations is non-empty */
+  const errorRateA = totalOpsA > 0 ? errorCountA / totalOpsA : 0;
+  if (errorRateA > allowedErrorRate) {
+    return {pass: false, message: () => `Function A: error rate ${errorCountA}/${totalOpsA} (${(errorRateA * 100).toFixed(1)}%) exceeds allowed ${(allowedErrorRate * 100).toFixed(1)}%`};
+  }
+  /* istanbul ignore next -- defensive guard: totalOps is always > 0 when durations is non-empty */
+  const errorRateB = totalOpsB > 0 ? errorCountB / totalOpsB : 0;
+  if (errorRateB > allowedErrorRate) {
+    return {pass: false, message: () => `Function B: error rate ${errorCountB}/${totalOpsB} (${(errorRateB * 100).toFixed(1)}%) exceeds allowed ${(allowedErrorRate * 100).toFixed(1)}%`};
+  }
+
+  // Remove outliers if enabled and verify minimum sample size for t-test
+  const checkA = prepareEffectiveDurations(durationsA, removeOutliersEnabled, 'Function A', 'operations');
+  if (!checkA.ok) return {pass: false, message: () => checkA.message};
+  const checkB = prepareEffectiveDurations(durationsB, removeOutliersEnabled, 'Function B', 'operations');
+  if (!checkB.ok) return {pass: false, message: () => checkB.message};
+
+  const statsA = calcStats(checkA.effective);
+  const statsB = calcStats(checkB.effective);
+  const tTest = welchTTest(statsA, statsB, confidence);
+  const alpha = 1 - confidence;
+  const pass = tTest.pValue < alpha;
+
+  // Use pre-outlier-removal counts for throughput (outlier removal cleans per-op stats, not ops completed)
+  const actualOpsPerSecondA = (durationsA.length / duration) * 1000;
+  const actualOpsPerSecondB = (durationsB.length / duration) * 1000;
+
+  const errorInfoA: ErrorInfo | undefined = errorCountA > 0 ? {errorCount: errorCountA, totalIterations: totalOpsA, allowedRate: allowedErrorRate} : undefined;
+  const errorInfoB: ErrorInfo | undefined = errorCountB > 0 ? {errorCount: errorCountB, totalIterations: totalOpsB, allowedRate: allowedErrorRate} : undefined;
+
+  const statsBlock = formatComparativeThroughputStatsBlock({
+    statsA, statsB, durationsA: checkA.effective, durationsB: checkB.effective,
+    actualOpsPerSecondA, actualOpsPerSecondB,
+    totalOpsA: durationsA.length, totalOpsB: durationsB.length,
+    duration, tTest, confidence, setupTeardownActive, errorInfoA, errorInfoB,
+  });
+
+  const warnings = hasWarningConditions(statsA, undefined, errorInfoA) || hasWarningConditions(statsB, undefined, errorInfoB);
+  logDiagnosticsIfNeeded(pass, statsBlock, opts.logDiagnostics, warnings);
+
+  return buildComparativeResult(
+    pass, alpha, tTest.pValue, statsBlock,
+    'expected Function A NOT to have higher throughput than Function B,\nbut A has statistically significantly higher throughput',
+    'expected Function A to have higher throughput than Function B,\nbut no statistically significant difference was found',
+  );
 }
