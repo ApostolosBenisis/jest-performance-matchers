@@ -216,7 +216,7 @@ export function generateComparisonInterpretation(
   return formatNotSignificantResult(tTest, absDiff, pctDiff, alpha);
 }
 
-function checkComparisonReliability(rmeA: Tag | null, rmeB: Tag | null): string | null {
+export function checkComparisonReliability(rmeA: Tag | null, rmeB: Tag | null): string | null {
   const unreliableA = rmeA !== null && rmeA.label === 'POOR';
   const unreliableB = rmeB !== null && rmeB.label === 'POOR';
   if (unreliableA || unreliableB) {
@@ -365,4 +365,51 @@ function interpretThroughputBelow(rme: Tag, cv: Tag, mad: Tag | null, pctBelow: 
     return `throughput is ${pctBelow.toFixed(1)}% below target; ops are genuinely inconsistent (CV: ${formatTag(cv)}) — investigate environment stability`;
   }
   return `throughput is consistently ${pctBelow.toFixed(1)}% below target with stable measurements (RME: ${formatTag(rme)}, CV: ${formatTag(cv)}) — the code is genuinely too slow`;
+}
+
+/**
+ * Generate a human-readable interpretation of a comparative throughput benchmark (A vs B).
+ *
+ * Mirrors `generateComparisonInterpretation` but frames the result in throughput
+ * (ops/sec) terms rather than duration terms.
+ */
+export function generateComparativeThroughputInterpretation(
+  statsA: Stats, statsB: Stats, tTest: WelchTTestResult, confidence: number,
+  actualOpsPerSecondA: number, actualOpsPerSecondB: number,
+): string {
+  const rmeA = classifyRME(statsA.relativeMarginOfError);
+  const rmeB = classifyRME(statsB.relativeMarginOfError);
+
+  const reliabilityCheck = checkComparisonReliability(rmeA, rmeB);
+  if (reliabilityCheck !== null) return reliabilityCheck;
+
+  const alpha = 1 - confidence;
+  const opsDiff = Math.abs(actualOpsPerSecondA - actualOpsPerSecondB);
+  /* istanbul ignore next -- defensive guard: actualOpsPerSecondB=0 requires empty durationsB, which is caught upstream */
+  const pctDiff = actualOpsPerSecondB === 0 ? 0 : (opsDiff / actualOpsPerSecondB) * 100;
+
+  if (tTest.pValue < alpha) {
+    return formatSignificantThroughputResult(tTest, actualOpsPerSecondA, actualOpsPerSecondB, opsDiff, pctDiff, alpha);
+  }
+  return formatNotSignificantThroughputResult(tTest, actualOpsPerSecondA, actualOpsPerSecondB, opsDiff, pctDiff, alpha);
+}
+
+function formatSignificantThroughputResult(tTest: WelchTTestResult, opsA: number, opsB: number, opsDiff: number, pctDiff: number, alpha: number): string {
+  let practical = '';
+  if (pctDiff < 1) {
+    practical = '. However, the difference is less than 1% — statistically significant but may be practically negligible';
+  } else if (pctDiff < 5) {
+    practical = '. The difference is modest (< 5%) — consider whether this is practically meaningful for your use case';
+  }
+  return `Function A has statistically significantly higher throughput than Function B (${Math.round(opsA)} vs ${Math.round(opsB)} ops/sec, p=${formatPValue(tTest.pValue)} < α=${alpha.toFixed(2)}), a difference of ${Math.round(opsDiff)} ops/sec (${pctDiff.toFixed(1)}%)${practical}`;
+}
+
+function formatNotSignificantThroughputResult(tTest: WelchTTestResult, opsA: number, opsB: number, opsDiff: number, pctDiff: number, alpha: number): string {
+  if (tTest.meanDifference < 0) {
+    return `no statistically significant evidence that Function A has higher throughput than Function B (${Math.round(opsA)} vs ${Math.round(opsB)} ops/sec, p=${formatPValue(tTest.pValue)} >= α=${alpha.toFixed(2)}). Function A trends higher by ${Math.round(opsDiff)} ops/sec (${pctDiff.toFixed(1)}%) but the difference could be due to chance — increase duration for more statistical power`;
+  }
+  if (tTest.meanDifference === 0) {
+    return `no statistically significant difference — both functions have identical throughput (p=${formatPValue(tTest.pValue)} >= α=${alpha.toFixed(2)})`;
+  }
+  return `Function A appears to have lower throughput than Function B by ${Math.round(opsDiff)} ops/sec (${pctDiff.toFixed(1)}%), not higher (p=${formatPValue(tTest.pValue)} >= α=${alpha.toFixed(2)})`;
 }

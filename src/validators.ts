@@ -4,6 +4,50 @@ function validateLogDiagnostics(logDiagnostics: string | undefined): void {
   }
 }
 
+function validateWarmup(warmup: number | undefined): void {
+  if (warmup !== undefined && (!Number.isInteger(warmup) || warmup < 0)) {
+    throw new Error(`jest-performance-matchers: warmup must be a non-negative integer, received ${warmup}`);
+  }
+}
+
+function validateConfidence(confidence: number | undefined): void {
+  if (confidence === undefined) return;
+  if (typeof confidence !== 'number' || !Number.isFinite(confidence) || confidence <= 0 || confidence >= 1) {
+    throw new Error(`jest-performance-matchers: confidence must be a number between 0 (exclusive) and 1 (exclusive), received ${confidence}`);
+  }
+}
+
+function validateOutliers(outliers: string | undefined): void {
+  if (outliers !== undefined && outliers !== 'remove' && outliers !== 'keep') {
+    throw new Error(`jest-performance-matchers: outliers must be 'remove' or 'keep', received '${outliers}'`);
+  }
+}
+
+function validateAllowedErrorRate(allowedErrorRate: number | undefined): void {
+  if (allowedErrorRate === undefined) return;
+  if (typeof allowedErrorRate !== 'number' || !Number.isFinite(allowedErrorRate) || allowedErrorRate < 0 || allowedErrorRate > 1) {
+    throw new Error(`jest-performance-matchers: allowedErrorRate must be a number between 0 and 1, received ${allowedErrorRate}`);
+  }
+}
+
+interface CommonTailOptions {
+  outliers?: 'remove' | 'keep' | string;
+  allowedErrorRate?: number;
+  logDiagnostics?: string;
+  setup?: unknown;
+  teardown?: unknown;
+  setupEach?: unknown;
+  teardownEach?: unknown;
+}
+
+/** Shared validation tail used by every multi-iteration matcher's options. */
+function validateCommonTail(options: CommonTailOptions): void {
+  validateOutliers(options.outliers);
+  validateAllowedErrorRate(options.allowedErrorRate);
+  validateLogDiagnostics(options.logDiagnostics);
+  validateSetupTeardown(options);
+}
+
 export function validateCallback(callback: unknown): void {
   if (typeof callback !== 'function') {
     throw new TypeError(`jest-performance-matchers: expected value must be a function, received ${typeof callback}`);
@@ -57,19 +101,8 @@ export function validateQuantileOptions(options: {
   if (!Number.isInteger(options.quantile) || options.quantile < 1 || options.quantile > 100) {
     throw new Error(`jest-performance-matchers: quantile must be an integer between 1 and 100, received ${options.quantile}`);
   }
-  if (options.warmup !== undefined && (!Number.isInteger(options.warmup) || options.warmup < 0)) {
-    throw new Error(`jest-performance-matchers: warmup must be a non-negative integer, received ${options.warmup}`);
-  }
-  if (options.outliers !== undefined && options.outliers !== 'remove' && options.outliers !== 'keep') {
-    throw new Error(`jest-performance-matchers: outliers must be 'remove' or 'keep', received '${options.outliers}'`);
-  }
-  if (options.allowedErrorRate !== undefined) {
-    if (typeof options.allowedErrorRate !== 'number' || !Number.isFinite(options.allowedErrorRate) || options.allowedErrorRate < 0 || options.allowedErrorRate > 1) {
-      throw new Error(`jest-performance-matchers: allowedErrorRate must be a number between 0 and 1, received ${options.allowedErrorRate}`);
-    }
-  }
-  validateLogDiagnostics(options.logDiagnostics);
-  validateSetupTeardown(options);
+  validateWarmup(options.warmup);
+  validateCommonTail(options);
 }
 
 export function validateComparativeOptions(options: {
@@ -90,29 +123,23 @@ export function validateComparativeOptions(options: {
   if (!Number.isInteger(options.iterations) || options.iterations < 2) {
     throw new Error(`jest-performance-matchers: iterations must be an integer >= 2 for comparative matchers (Welch's t-test requires n >= 2 per function), received ${options.iterations}`);
   }
-  if (options.warmup !== undefined && (!Number.isInteger(options.warmup) || options.warmup < 0)) {
-    throw new Error(`jest-performance-matchers: warmup must be a non-negative integer, received ${options.warmup}`);
-  }
-  if (options.confidence !== undefined) {
-    if (typeof options.confidence !== 'number' || !Number.isFinite(options.confidence) || options.confidence <= 0 || options.confidence >= 1) {
-      throw new Error(`jest-performance-matchers: confidence must be a number between 0 (exclusive) and 1 (exclusive), received ${options.confidence}`);
-    }
-  }
-  if (options.outliers !== undefined && options.outliers !== 'remove' && options.outliers !== 'keep') {
-    throw new Error(`jest-performance-matchers: outliers must be 'remove' or 'keep', received '${options.outliers}'`);
-  }
-  if (options.allowedErrorRate !== undefined) {
-    if (typeof options.allowedErrorRate !== 'number' || !Number.isFinite(options.allowedErrorRate) || options.allowedErrorRate < 0 || options.allowedErrorRate > 1) {
-      throw new Error(`jest-performance-matchers: allowedErrorRate must be a number between 0 and 1, received ${options.allowedErrorRate}`);
-    }
-  }
-  validateLogDiagnostics(options.logDiagnostics);
-  validateSetupTeardown(options);
+  validateWarmup(options.warmup);
+  validateConfidence(options.confidence);
+  validateCommonTail(options);
 }
 
 export function validateExpectedOpsPerSecond(expectedOpsPerSecond: number): void {
   if (typeof expectedOpsPerSecond !== 'number' || !Number.isFinite(expectedOpsPerSecond) || expectedOpsPerSecond <= 0) {
     throw new Error(`jest-performance-matchers: expected ops/sec must be a positive number, received ${expectedOpsPerSecond}`);
+  }
+}
+
+function validateDurationOptionsHeader(options: { duration?: unknown }): void {
+  if (!options || typeof options !== 'object') {
+    throw new Error('jest-performance-matchers: options must be an object with duration');
+  }
+  if (typeof options.duration !== 'number' || !Number.isFinite(options.duration) || options.duration <= 0) {
+    throw new Error(`jest-performance-matchers: duration must be a positive number, received ${options.duration}`);
   }
 }
 
@@ -127,23 +154,25 @@ export function validateThroughputOptions(options: {
   allowedErrorRate?: number,
   logDiagnostics?: string,
 }): void {
-  if (!options || typeof options !== 'object') {
-    throw new Error('jest-performance-matchers: options must be an object with duration');
-  }
-  if (typeof options.duration !== 'number' || !Number.isFinite(options.duration) || options.duration <= 0) {
-    throw new Error(`jest-performance-matchers: duration must be a positive number, received ${options.duration}`);
-  }
-  if (options.warmup !== undefined && (!Number.isInteger(options.warmup) || options.warmup < 0)) {
-    throw new Error(`jest-performance-matchers: warmup must be a non-negative integer, received ${options.warmup}`);
-  }
-  if (options.outliers !== undefined && options.outliers !== 'remove' && options.outliers !== 'keep') {
-    throw new Error(`jest-performance-matchers: outliers must be 'remove' or 'keep', received '${options.outliers}'`);
-  }
-  if (options.allowedErrorRate !== undefined) {
-    if (typeof options.allowedErrorRate !== 'number' || !Number.isFinite(options.allowedErrorRate) || options.allowedErrorRate < 0 || options.allowedErrorRate > 1) {
-      throw new Error(`jest-performance-matchers: allowedErrorRate must be a number between 0 and 1, received ${options.allowedErrorRate}`);
-    }
-  }
-  validateLogDiagnostics(options.logDiagnostics);
-  validateSetupTeardown(options);
+  validateDurationOptionsHeader(options);
+  validateWarmup(options.warmup);
+  validateCommonTail(options);
+}
+
+export function validateComparativeThroughputOptions(options: {
+  duration: number,
+  warmup?: number,
+  confidence?: number,
+  outliers?: 'remove' | 'keep',
+  setup?: unknown,
+  teardown?: unknown,
+  setupEach?: unknown,
+  teardownEach?: unknown,
+  allowedErrorRate?: number,
+  logDiagnostics?: string,
+}): void {
+  validateDurationOptionsHeader(options);
+  validateWarmup(options.warmup);
+  validateConfidence(options.confidence);
+  validateCommonTail(options);
 }

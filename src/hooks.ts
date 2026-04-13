@@ -84,3 +84,17 @@ export async function warmupAsync(callback: AsyncCallback, warmupCount: number, 
     await runAsyncWithHooks(callback, suiteState, hooks);
   }
 }
+
+export function warmupSyncInterleaved(callbackA: SyncCallback, callbackB: SyncCallback, warmupCount: number, suiteState: unknown, hooks: SyncHooks): void {
+  for (let i = 0; i < warmupCount; i++) {
+    runSyncWithHooks(callbackA, suiteState, hooks);
+    runSyncWithHooks(callbackB, suiteState, hooks);
+  }
+}
+
+export async function warmupAsyncInterleaved(callbackA: AsyncCallback, callbackB: AsyncCallback, warmupCount: number, suiteState: unknown, hooks: AsyncHooks): Promise<void> {
+  for (let i = 0; i < warmupCount; i++) {
+    await runAsyncWithHooks(callbackA, suiteState, hooks);
+    await runAsyncWithHooks(callbackB, suiteState, hooks);
+  }
+}

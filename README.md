@@ -28,6 +28,10 @@ expect(() => quicksort(data))
 // Assert your parser sustains at least 10,000 ops/sec over a 1-second window
 expect(() => parseJSON(payload))
     .toAchieveOpsPerSecond(10000, { duration: 1000, warmup: 100 });
+
+// Prove your new serializer has statistically higher throughput than the baseline
+expect(() => fastSerialize(payload))
+    .toHaveHigherThroughputThan(() => baselineSerialize(payload), { duration: 1000, warmup: 100 });
 ```
 
 ## What is this for?
@@ -161,6 +165,15 @@ expect(() => optimizedParser(input))
 await expect(async () => await queryWithIndex(db, id))
     .toResolveFasterThan(async () => await queryFullScan(db, id), {
         iterations: 50, warmup: 3, outliers: 'remove'
+    });
+```
+
+### Throughput comparison
+
+```ts
+expect(() => fastSerialize(payload))
+    .toHaveHigherThroughputThan(() => baselineSerialize(payload), {
+        duration: 1000, warmup: 100, outliers: 'remove'
     });
 ```
 
@@ -369,6 +382,56 @@ await expect(async () => {
 }).not.toResolveAtOpsPerSecond(10000, { duration: 1000 });
 ```
 
+### `.toHaveHigherThroughputThan(comparisonFn, options)`
+
+Assert that a synchronous function has statistically higher throughput than another using Welch's t-test. Each function runs independently for the specified `duration` window, collecting per-operation timings — then Welch's t-test determines whether Function A has significantly lower per-op time (= higher throughput) than Function B:
+
+```ts
+// Basic — prove the new serializer has higher throughput than the baseline
+expect(() => fastSerialize(payload))
+    .toHaveHigherThroughputThan(() => baselineSerialize(payload), { duration: 1000 });
+
+// With warmup — exclude JIT compilation and cache warming
+expect(() => fastSerialize(payload))
+    .toHaveHigherThroughputThan(() => baselineSerialize(payload), { duration: 1000, warmup: 100 });
+
+// With outlier removal — filter GC pauses before comparing
+expect(() => fastSerialize(payload))
+    .toHaveHigherThroughputThan(() => baselineSerialize(payload), { duration: 1000, outliers: 'remove' });
+
+// With custom confidence — require 99% confidence instead of 95%
+expect(() => fastSerialize(payload))
+    .toHaveHigherThroughputThan(() => baselineSerialize(payload), { duration: 1000, confidence: 0.99 });
+
+// Negation — assert Function A is NOT higher-throughput than Function B
+expect(() => legacyProcess(data))
+    .not.toHaveHigherThroughputThan(() => optimizedProcess(data), { duration: 1000 });
+
+// With error tolerance — tolerate up to 5% of operations throwing
+expect(() => processUnstable(data))
+    .toHaveHigherThroughputThan(() => processStable(data), { duration: 1000, allowedErrorRate: 0.05 });
+```
+
+### `.toResolveWithHigherThroughputThan(comparisonFn, options)`
+
+Assert that an asynchronous function has statistically higher throughput than another using Welch's t-test. Same API as `.toHaveHigherThroughputThan`, but for promise-returning functions:
+
+```ts
+// Basic
+await expect(async () => await cachedFetch(url))
+    .toResolveWithHigherThroughputThan(async () => await uncachedFetch(url), { duration: 2000 });
+
+// With warmup and outlier removal
+await expect(async () => await cachedFetch(url))
+    .toResolveWithHigherThroughputThan(async () => await uncachedFetch(url), {
+        duration: 2000, warmup: 50, outliers: 'remove'
+    });
+
+// Negation
+await expect(async () => await slowHandler(req))
+    .not.toResolveWithHigherThroughputThan(async () => await fastHandler(req), { duration: 1000 });
+```
+
 ### Throughput options reference
 
 | Option | Type | Required | Description |
@@ -441,6 +504,24 @@ expect((conn: DbConnection, data: Row[]) => {
 ```
 
 Setup, teardown, setupEach, and teardownEach time is excluded from measurements. If any throws, the test fails immediately — these are test infrastructure errors, not tolerated failures.
+
+### Comparative throughput options reference
+
+| Option | Type | Required | Description |
+|---|---|---|---|
+| `duration` | `number` | Yes | Time window in milliseconds applied to each function independently (e.g., `1000` for 1 second each) |
+| `warmup` | `number` | No | Warmup iterations to run before measurement (default: `0`). Interleaved between A and B |
+| `confidence` | `number` | No | Significance level for the t-test, between 0 and 1 exclusive (default: `0.95`). Higher values require stronger evidence |
+| `outliers` | `'remove' \| 'keep'` | No | Whether to remove IQR-based outliers per function before comparison (default: `'keep'`). Outlier removal cleans per-op stats; total ops count is preserved |
+| `setup` | `() => T` | No | Called **once** before all operations. Return value is shared by both functions via `setupEach`, callbacks, and `teardown`. Errors are fatal |
+| `teardown` | `(suiteState: T) => void` | No | Called **once** after both measurement windows (in a `finally` block). Receives the `setup` return value. Errors are fatal |
+| `setupEach` | `(suiteState: T) => U` | No | Called before **each operation** (including warmup), not timed. Its return value is passed to the callback and `teardownEach`. Errors are fatal |
+| `teardownEach` | `(suiteState: T, iterState: U) => void` | No | Called after **each operation** (including warmup), not timed. Receives both `setup` and `setupEach` return values. Errors are fatal |
+| `allowedErrorRate` | `number` | No | Fraction of operations allowed to throw per function (0–1, default: `0`). Error rates are checked independently for each function. Setup/teardown errors are always fatal |
+
+> **Execution model:** Warmup iterations are interleaved (A, B, A, B, ...) so neither function gets a cache-warming advantage. Measurement then runs Function A for the full `duration` window, then Function B for the full `duration` window — each independently collects per-operation timings. Welch's t-test on the per-op durations determines whether A's mean is significantly lower than B's (lower per-op time = higher throughput). Unequal sample sizes are expected (the faster function completes more ops in the same window) and handled natively by Welch's t-test.
+
+> **Note:** For async matchers (`toResolveWithHigherThroughputThan`), `setup` and `setupEach` may return a `Promise`, and `teardown`/`teardownEach` may return a `Promise`.
 
 ### Quantile options reference
 
@@ -597,6 +678,45 @@ The comparative diagnostics include:
 - **Per-function stats** — full diagnostics for each function (same format as quantile matchers: mean, CI, RME, CV, MAD, distribution, shape, interpretation)
 - **Mean difference** — raw difference in milliseconds and as a percentage
 - **Welch's t-test** — t-statistic, degrees of freedom (Welch-Satterthwaite), and one-sided p-value
+
+### Comparative throughput matcher diagnostics
+
+When a comparative throughput matcher (`toHaveHigherThroughputThan` / `toResolveWithHigherThroughputThan`) fails, it outputs per-function throughput stats and a statistical comparison framed in ops/sec:
+
+```
+expected Function A to have higher throughput than Function B,
+but no statistically significant difference was found (p=0.1410 >= α=0.05)
+
+--- Function A ---
+Throughput: 8,432 ops/sec over 1,000ms (8,432 total operations)
+  CI 95%: [8,105, 8,759] ops/sec
+
+Per-operation timing (n=8432): mean=0.119ms, median=0.108ms, stddev=0.042ms, MAD=0.015ms
+  CI 95%: [0.118, 0.120]ms | RME: 0.89% [GOOD <10%] | CV: 0.35 [POOR >0.3]
+  ...
+
+--- Function B ---
+Throughput: 8,210 ops/sec over 1,000ms (8,210 total operations)
+  CI 95%: [7,891, 8,534] ops/sec
+  ...
+
+--- Comparison ---
+Throughput: A=8432 ops/sec, B=8210 ops/sec — Function A is higher by 222 ops/sec
+Welch's t-test: t=-1.08, df=188.3, p=0.1410 (one-sided)
+Confidence interval for per-op difference: 95% [-0.004, 0.001]ms
+Result: no statistically significant evidence that Function A has higher throughput
+  than Function B (8432 vs 8210 ops/sec, p=0.1410 >= α=0.05). Function A trends
+  higher by 222 ops/sec (2.7%) but the difference could be due to chance —
+  increase duration for more statistical power
+```
+
+The comparative throughput diagnostics include:
+- **Per-function throughput** — achieved ops/sec, measurement duration, total operations completed, and throughput CI
+- **Per-operation timing** — full per-op stats for each function (mean, CI, RME, CV, MAD, distribution, shape)
+- **Throughput difference** — raw difference in ops/sec with direction (higher/lower/identical)
+- **Welch's t-test** — t-statistic, degrees of freedom, one-sided p-value on per-op durations
+- **Confidence interval for per-op difference** — if this interval excludes zero, the functions have meaningfully different per-operation timings
+- **Result interpretation** — considers data reliability (POOR RME warnings), statistical significance, and practical significance (percentage difference in throughput)
 - **Confidence interval for the difference** — if this interval excludes zero, the functions have meaningfully different performance
 - **Result interpretation** — considers data reliability (POOR RME warnings), statistical significance (p-value vs α), and practical significance (percentage difference)
 

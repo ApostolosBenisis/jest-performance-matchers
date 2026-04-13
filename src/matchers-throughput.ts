@@ -3,7 +3,7 @@ import {validateCallback, validateExpectedOpsPerSecond, validateThroughputOption
 import {processThroughputResults} from "./helpers";
 import {SyncHooks, AsyncHooks, SyncCallback, AsyncCallback, warmupSync, warmupAsync} from "./hooks";
 
-function measureSyncThroughput(
+export function measureSyncThroughput(
   callback: SyncCallback, duration: number, suiteState: unknown,
   hooks: SyncHooks, allowedErrorRate: number,
 ): { durations: number[]; errorCount: number } {
@@ -71,7 +71,7 @@ export function toAchieveOpsPerSecond(callback: SyncCallback, expectedOpsPerSeco
   }
 }
 
-async function measureAsyncThroughput(
+export async function measureAsyncThroughput(
   callback: AsyncCallback, duration: number, suiteState: unknown,
   hooks: AsyncHooks, allowedErrorRate: number,
 ): Promise<{ durations: number[]; errorCount: number }> {
