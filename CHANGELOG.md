@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-04-14
+
+### Added
+- `toBeFasterThan` / `toResolveFasterThan` comparative matchers — assert one function is statistically significantly faster than another using Welch's t-test. (Ref: #13)
+- `toAchieveOpsPerSecond` / `toResolveAtOpsPerSecond` throughput matchers — assert a function achieves a minimum number of operations per second over a time-bounded measurement window. (Ref: #14)
+- `toHaveHigherThroughputThan` / `toResolveWithHigherThroughputThan` comparative throughput matchers — assert one function achieves statistically significantly higher throughput than another. (Ref: #24)
+- Configurable `logDiagnostics` option (`'FAIL'` | `'WARN'` | `'INFO'`) for all multi-iteration matchers — controls when statistical diagnostics are printed to the console, making warnings visible even on passing tests. Default: `'WARN'`. (Ref: #72)
+- MAD (Median Absolute Deviation) added to `Stats` interface — robust spread metric less sensitive to outliers than standard deviation. Used in diagnostic interpretations. (Ref: #34)
+- Setup/teardown hooks (`setup`, `teardown`, `setupEach`, `teardownEach`) for all matchers — suite-level and per-iteration setup/teardown excluded from timing measurements. (Ref: #30)
+- Error rate tolerance (`allowedErrorRate`) option for quantile matchers — allows a configurable fraction of iterations to fail without failing the test. (Ref: #33)
+- Star call-to-action in README and postinstall banner. (Ref: #53)
+
+### Fixed
+- Comparative matcher Result interpretations now reflect CV/MAD quality warnings and error rate notes, consistent with single-function matchers. (Ref: #90)
+- Adaptive millisecond formatting for sub-millisecond values. (Ref: #85)
+- Simplified redundant `unknown | Promise<unknown>` union types in async matcher options. (Ref: #82)
+
+### Changed
+- Source code split from monolithic `main.ts` into focused modules: `matchers-quantile.ts`, `matchers-comparative.ts`, `matchers-throughput.ts`, `matchers-comparative-throughput.ts`, `hooks.ts`, `validators.ts`, `helpers.ts`, `diagnostics.ts`, `shape.ts`, `format.ts`, `timing.ts`. (Ref: #16ff87c)
+- Reduced cognitive complexity in `formatThroughputStatsBlock` and quantile matchers. (Ref: #81)
+- Consolidated duplicate `SyncHooks` / `AsyncHooks` interfaces into shared types. (Ref: #85)
+
 ## [1.3.1] - 2026-04-06
 
 ### Added
