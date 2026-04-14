@@ -196,8 +196,12 @@ export function generateInterpretation(stats: Stats, expectedDuration?: number, 
  * 3. Practical significance (percentage difference)
  * 4. CI overlap between the two functions
  */
+type ComparativeErrorInfo = { errorCount: number; totalIterations: number; allowedRate: number };
+export type ComparativeErrorInfos = { a?: ComparativeErrorInfo; b?: ComparativeErrorInfo };
+
 export function generateComparisonInterpretation(
-  statsA: Stats, statsB: Stats, tTest: WelchTTestResult, confidence: number
+  statsA: Stats, statsB: Stats, tTest: WelchTTestResult, confidence: number,
+  errorInfo?: ComparativeErrorInfos,
 ): string {
   const rmeA = classifyRME(statsA.relativeMarginOfError);
   const rmeB = classifyRME(statsB.relativeMarginOfError);
@@ -210,15 +214,16 @@ export function generateComparisonInterpretation(
   const absDiff = Math.abs(tTest.meanDifference);
   const pctDiff = meanB === 0 ? 0 : (absDiff / Math.abs(meanB)) * 100;
 
-  if (tTest.pValue < alpha) {
-    return formatSignificantResult(tTest, absDiff, pctDiff, alpha);
-  }
-  return formatNotSignificantResult(tTest, absDiff, pctDiff, alpha);
+  const base = tTest.pValue < alpha
+    ? formatSignificantResult(tTest, absDiff, pctDiff, alpha)
+    : formatNotSignificantResult(tTest, absDiff, pctDiff, alpha);
+
+  return appendComparativeQualityNotes(base, statsA, statsB, errorInfo, 'iterations');
 }
 
 export function checkComparisonReliability(rmeA: Tag | null, rmeB: Tag | null): string | null {
-  const unreliableA = rmeA !== null && rmeA.label === 'POOR';
-  const unreliableB = rmeB !== null && rmeB.label === 'POOR';
+  const unreliableA = rmeA?.label === 'POOR';
+  const unreliableB = rmeB?.label === 'POOR';
   if (unreliableA || unreliableB) {
     let which: string;
     if (unreliableA && unreliableB) which = 'both functions have';
@@ -250,6 +255,68 @@ function formatNotSignificantResult(tTest: WelchTTestResult, absDiff: number, pc
     return `no statistically significant difference — both functions have identical mean timing (p=${formatPValue(tTest.pValue)} >= α=${alpha.toFixed(2)})`;
   }
   return `Function A appears to be slower than Function B by ${formatMs(absDiff)}ms (${pctDiff.toFixed(1)}%), not faster (p=${formatPValue(tTest.pValue)} >= α=${alpha.toFixed(2)})`;
+}
+
+/**
+ * Build a CV/MAD quality note for one function in a comparative interpretation.
+ * Mirrors the single-fn `interpretPoorCV` branching on MAD: when MAD is GOOD/FAIR,
+ * outliers are inflating variance (suggest `outliers: 'remove'`); otherwise runs
+ * are genuinely inconsistent (suggest investigating noise sources).
+ *
+ * Returns null when CV is not POOR — the caller skips the note entirely.
+ */
+function formatComparativeCVNote(label: 'A' | 'B', cv: Tag | null, mad: Tag | null): string | null {
+  if (cv?.label !== 'POOR') return null;
+  if (mad !== null && mad.label !== 'POOR') {
+    return `Function ${label} has noisy per-op stats (CV: ${formatTag(cv)}, MAD: ${formatTag(mad)}) — outliers are inflating variance; consider enabling outlier removal via { outliers: 'remove' }`;
+  }
+  const madSuffix = mad === null ? '' : `, MAD: ${formatTag(mad)}`;
+  return `Function ${label} has inconsistent per-op stats (CV: ${formatTag(cv)}${madSuffix}) — investigate noise sources (GC, I/O, scheduling)`;
+}
+
+/**
+ * Format a per-function error-exclusion note mirroring the single-fn pattern.
+ * Uses "iterations/runs" phrasing for duration matchers and "operations/ops"
+ * phrasing for throughput matchers.
+ */
+function formatComparativeErrorNote(
+  label: 'A' | 'B',
+  errorInfo: { errorCount: number; totalIterations: number },
+  unit: 'iterations' | 'operations',
+): string {
+  if (unit === 'operations') {
+    return `${errorInfo.errorCount} of ${errorInfo.totalIterations} operations for Function ${label} failed and were excluded — stats reflect successful ops only`;
+  }
+  return `${errorInfo.errorCount} of ${errorInfo.totalIterations} iterations for Function ${label} were excluded due to errors — stats reflect successful runs only`;
+}
+
+/**
+ * Append CV/MAD and error-rate quality notes to a comparative interpretation's
+ * lead message. Append-only — the input `message` is preserved byte-for-byte.
+ * Only reachable on the non-short-circuit path (both RME non-null and non-POOR);
+ * the reliability-check early return bypasses this entirely.
+ */
+function appendComparativeQualityNotes(
+  message: string,
+  statsA: Stats, statsB: Stats,
+  errorInfo: ComparativeErrorInfos | undefined,
+  unit: 'iterations' | 'operations',
+): string {
+  let result = message;
+
+  const cvNoteA = formatComparativeCVNote('A', classifyCV(statsA.coefficientOfVariation), classifyMAD(statsA.mad, statsA.median));
+  if (cvNoteA !== null) result += `. Note: ${cvNoteA}`;
+  const cvNoteB = formatComparativeCVNote('B', classifyCV(statsB.coefficientOfVariation), classifyMAD(statsB.mad, statsB.median));
+  if (cvNoteB !== null) result += `. Note: ${cvNoteB}`;
+
+  if (errorInfo?.a?.errorCount) {
+    result += `. Note: ${formatComparativeErrorNote('A', errorInfo.a, unit)}`;
+  }
+  if (errorInfo?.b?.errorCount) {
+    result += `. Note: ${formatComparativeErrorNote('B', errorInfo.b, unit)}`;
+  }
+
+  return result;
 }
 
 export function formatPValue(p: number): string {
@@ -376,6 +443,7 @@ function interpretThroughputBelow(rme: Tag, cv: Tag, mad: Tag | null, pctBelow: 
 export function generateComparativeThroughputInterpretation(
   statsA: Stats, statsB: Stats, tTest: WelchTTestResult, confidence: number,
   actualOpsPerSecondA: number, actualOpsPerSecondB: number,
+  errorInfo?: ComparativeErrorInfos,
 ): string {
   const rmeA = classifyRME(statsA.relativeMarginOfError);
   const rmeB = classifyRME(statsB.relativeMarginOfError);
@@ -388,10 +456,11 @@ export function generateComparativeThroughputInterpretation(
   /* istanbul ignore next -- defensive guard: actualOpsPerSecondB=0 requires empty durationsB, which is caught upstream */
   const pctDiff = actualOpsPerSecondB === 0 ? 0 : (opsDiff / actualOpsPerSecondB) * 100;
 
-  if (tTest.pValue < alpha) {
-    return formatSignificantThroughputResult(tTest, actualOpsPerSecondA, actualOpsPerSecondB, opsDiff, pctDiff, alpha);
-  }
-  return formatNotSignificantThroughputResult(tTest, actualOpsPerSecondA, actualOpsPerSecondB, opsDiff, pctDiff, alpha);
+  const base = tTest.pValue < alpha
+    ? formatSignificantThroughputResult(tTest, actualOpsPerSecondA, actualOpsPerSecondB, opsDiff, pctDiff, alpha)
+    : formatNotSignificantThroughputResult(tTest, actualOpsPerSecondA, actualOpsPerSecondB, opsDiff, pctDiff, alpha);
+
+  return appendComparativeQualityNotes(base, statsA, statsB, errorInfo, 'operations');
 }
 
 function formatSignificantThroughputResult(tTest: WelchTTestResult, opsA: number, opsB: number, opsDiff: number, pctDiff: number, alpha: number): string {

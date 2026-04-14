@@ -1,6 +1,7 @@
 import {
   classifyRME, classifyCV, classifyMAD, classifySampleAdequacy,
   generateInterpretation, generateComparisonInterpretation, generateThroughputInterpretation,
+  generateComparativeThroughputInterpretation,
   hasWarningConditions, formatTag, Tag
 } from '../src/diagnostics';
 import {formatMs} from '../src/format';
@@ -783,6 +784,370 @@ describe("Test generateComparisonInterpretation function", () => {
 
     // THEN it reports significance without throwing a division-by-zero error
     expect(actualResult).toContain('statistically significantly faster');
+  });
+
+  test("should append CV/MAD note for Function A when A has POOR CV with GOOD MAD", () => {
+    // GIVEN Function A with POOR CV and GOOD MAD (outliers inflating variance), B clean
+    const givenFunctionAStats = buildCompStats({relativeMarginOfError: 8, coefficientOfVariation: 0.5, mad: 0.3, mean: 5, median: 5});
+    const givenFunctionBStats = buildCompStats({relativeMarginOfError: 5, coefficientOfVariation: 0.1, mean: 10, median: 10});
+    const givenTTest = buildTTest({pValue: 0.001, meanDifference: -5});
+
+    // WHEN generating comparison interpretation
+    const actualResult = generateComparisonInterpretation(givenFunctionAStats, givenFunctionBStats, givenTTest, 0.95);
+
+    // THEN the lead message is unchanged and a CV/MAD note recommends outlier removal for Function A
+    expect(actualResult).toMatch(/^Function A is statistically significantly faster/);
+    expect(actualResult).toContain("Note: Function A has noisy per-op stats");
+    expect(actualResult).toContain("outliers: 'remove'");
+    expect(actualResult).not.toContain('Function B has noisy');
+    expect(actualResult).not.toContain('Function B has inconsistent');
+  });
+
+  test("should append inconsistent note for Function A when A has POOR CV with POOR MAD", () => {
+    // GIVEN Function A with POOR CV and POOR MAD (genuinely inconsistent), B clean
+    const givenFunctionAStats = buildCompStats({relativeMarginOfError: 8, coefficientOfVariation: 0.5, mad: 2, mean: 5, median: 5});
+    const givenFunctionBStats = buildCompStats({relativeMarginOfError: 5, coefficientOfVariation: 0.1, mean: 10, median: 10});
+    const givenTTest = buildTTest({pValue: 0.001, meanDifference: -5});
+
+    // WHEN generating comparison interpretation
+    const actualResult = generateComparisonInterpretation(givenFunctionAStats, givenFunctionBStats, givenTTest, 0.95);
+
+    // THEN the note points to noise sources rather than outlier removal
+    expect(actualResult).toContain('Note: Function A has inconsistent per-op stats');
+    expect(actualResult).toContain('investigate noise sources');
+    expect(actualResult).not.toContain("outliers: 'remove'");
+  });
+
+  test("should append inconsistent note without MAD suffix when MAD cannot be computed", () => {
+    // GIVEN Function A with POOR CV but median=0 (MAD classification returns null)
+    const givenFunctionAStats = buildCompStats({relativeMarginOfError: 8, coefficientOfVariation: 0.5, mad: 1, mean: 5, median: 0});
+    const givenFunctionBStats = buildCompStats({relativeMarginOfError: 5, coefficientOfVariation: 0.1, mean: 10, median: 10});
+    const givenTTest = buildTTest({pValue: 0.001, meanDifference: -5});
+
+    // WHEN generating comparison interpretation
+    const actualResult = generateComparisonInterpretation(givenFunctionAStats, givenFunctionBStats, givenTTest, 0.95);
+
+    // THEN the note is emitted without a MAD clause
+    expect(actualResult).toContain('Note: Function A has inconsistent per-op stats (CV: POOR >0.3)');
+    expect(actualResult).toContain('investigate noise sources');
+    expect(actualResult).not.toContain('MAD:');
+  });
+
+  test("should append CV/MAD notes for both functions when both have POOR CV", () => {
+    // GIVEN Function A with POOR CV+GOOD MAD, Function B with POOR CV+POOR MAD
+    const givenFunctionAStats = buildCompStats({relativeMarginOfError: 8, coefficientOfVariation: 0.5, mad: 0.3, mean: 5, median: 5});
+    const givenFunctionBStats = buildCompStats({relativeMarginOfError: 8, coefficientOfVariation: 0.5, mad: 4, mean: 10, median: 10});
+    const givenTTest = buildTTest({pValue: 0.001, meanDifference: -5});
+
+    // WHEN generating comparison interpretation
+    const actualResult = generateComparisonInterpretation(givenFunctionAStats, givenFunctionBStats, givenTTest, 0.95);
+
+    // THEN both functions receive appropriate per-function notes, A before B
+    const indexA = actualResult.indexOf('Function A has noisy per-op stats');
+    const indexB = actualResult.indexOf('Function B has inconsistent per-op stats');
+    expect(indexA).toBeGreaterThan(-1);
+    expect(indexB).toBeGreaterThan(indexA);
+  });
+
+  test("should append error-rate note for Function A when errorInfoA reports excluded iterations", () => {
+    // GIVEN clean stats on both but errorInfoA has 3 of 100 excluded iterations
+    const givenFunctionAStats = buildCompStats({relativeMarginOfError: 5, coefficientOfVariation: 0.1, mean: 5, median: 5});
+    const givenFunctionBStats = buildCompStats({relativeMarginOfError: 5, coefficientOfVariation: 0.1, mean: 10, median: 10});
+    const givenTTest = buildTTest({pValue: 0.001, meanDifference: -5});
+    const givenErrorInfoA = {errorCount: 3, totalIterations: 100, allowedRate: 0.1};
+
+    // WHEN generating comparison interpretation with errorInfo.a
+    const actualResult = generateComparisonInterpretation(givenFunctionAStats, givenFunctionBStats, givenTTest, 0.95, {a: givenErrorInfoA});
+
+    // THEN it appends an iteration-exclusion note for Function A only
+    expect(actualResult).toContain('Note: 3 of 100 iterations for Function A were excluded due to errors');
+    expect(actualResult).not.toContain('Function B were excluded');
+  });
+
+  test("should append error-rate note for Function B when errorInfoB reports excluded iterations", () => {
+    // GIVEN clean stats on both but errorInfoB has 7 of 100 excluded iterations
+    const givenFunctionAStats = buildCompStats({relativeMarginOfError: 5, coefficientOfVariation: 0.1, mean: 5, median: 5});
+    const givenFunctionBStats = buildCompStats({relativeMarginOfError: 5, coefficientOfVariation: 0.1, mean: 10, median: 10});
+    const givenTTest = buildTTest({pValue: 0.001, meanDifference: -5});
+    const givenErrorInfoB = {errorCount: 7, totalIterations: 100, allowedRate: 0.1};
+
+    // WHEN generating comparison interpretation with errorInfo.b
+    const actualResult = generateComparisonInterpretation(givenFunctionAStats, givenFunctionBStats, givenTTest, 0.95, {b: givenErrorInfoB});
+
+    // THEN it appends an iteration-exclusion note for Function B only
+    expect(actualResult).toContain('Note: 7 of 100 iterations for Function B were excluded due to errors');
+    expect(actualResult).not.toContain('Function A were excluded');
+  });
+
+  test("should append error-rate notes for both functions when both have errors", () => {
+    // GIVEN errorInfoA and errorInfoB both have excluded iterations
+    const givenFunctionAStats = buildCompStats({relativeMarginOfError: 5, coefficientOfVariation: 0.1, mean: 5, median: 5});
+    const givenFunctionBStats = buildCompStats({relativeMarginOfError: 5, coefficientOfVariation: 0.1, mean: 10, median: 10});
+    const givenTTest = buildTTest({pValue: 0.001, meanDifference: -5});
+    const givenErrorInfoA = {errorCount: 2, totalIterations: 50, allowedRate: 0.1};
+    const givenErrorInfoB = {errorCount: 4, totalIterations: 50, allowedRate: 0.1};
+
+    // WHEN generating comparison interpretation with both error infos
+    const actualResult = generateComparisonInterpretation(givenFunctionAStats, givenFunctionBStats, givenTTest, 0.95, {a: givenErrorInfoA, b: givenErrorInfoB});
+
+    // THEN notes for both functions are present, A before B
+    const indexA = actualResult.indexOf('2 of 50 iterations for Function A');
+    const indexB = actualResult.indexOf('4 of 50 iterations for Function B');
+    expect(indexA).toBeGreaterThan(-1);
+    expect(indexB).toBeGreaterThan(indexA);
+  });
+
+  test("should not append any Note when stats are clean and no errorInfo is provided", () => {
+    // GIVEN clean stats on both functions and no errorInfo
+    const givenFunctionAStats = buildCompStats({relativeMarginOfError: 5, coefficientOfVariation: 0.1, mean: 5, median: 5});
+    const givenFunctionBStats = buildCompStats({relativeMarginOfError: 5, coefficientOfVariation: 0.1, mean: 10, median: 10});
+    const givenTTest = buildTTest({pValue: 0.001, meanDifference: -5});
+
+    // WHEN generating comparison interpretation
+    const actualResult = generateComparisonInterpretation(givenFunctionAStats, givenFunctionBStats, givenTTest, 0.95);
+
+    // THEN no quality Note is appended (regression guard for the no-op path)
+    expect(actualResult).not.toContain('Note:');
+  });
+
+  test("should not append any Note when errorInfo is provided but errorCount is zero", () => {
+    // GIVEN errorInfo objects with errorCount=0 on both functions
+    const givenFunctionAStats = buildCompStats({relativeMarginOfError: 5, coefficientOfVariation: 0.1, mean: 5, median: 5});
+    const givenFunctionBStats = buildCompStats({relativeMarginOfError: 5, coefficientOfVariation: 0.1, mean: 10, median: 10});
+    const givenTTest = buildTTest({pValue: 0.001, meanDifference: -5});
+    const givenEmpty = {errorCount: 0, totalIterations: 100, allowedRate: 0.1};
+
+    // WHEN generating comparison interpretation
+    const actualResult = generateComparisonInterpretation(givenFunctionAStats, givenFunctionBStats, givenTTest, 0.95, {a: givenEmpty, b: givenEmpty});
+
+    // THEN no error-rate note is appended
+    expect(actualResult).not.toContain('were excluded due to errors');
+  });
+
+  test("should NOT append quality notes when reliability short-circuit triggers (POOR RME)", () => {
+    // GIVEN Function A with POOR RME, POOR CV, and errors — the reliability path must short-circuit
+    const givenFunctionAStats = buildCompStats({relativeMarginOfError: 40, coefficientOfVariation: 0.5, mad: 2, mean: 10, median: 10});
+    const givenFunctionBStats = buildCompStats({relativeMarginOfError: 5, coefficientOfVariation: 0.1, mean: 15, median: 15});
+    const givenTTest = buildTTest({pValue: 0.01, meanDifference: -5});
+    const givenErrorInfoA = {errorCount: 3, totalIterations: 100, allowedRate: 0.1};
+
+    // WHEN generating comparison interpretation
+    const actualResult = generateComparisonInterpretation(givenFunctionAStats, givenFunctionBStats, givenTTest, 0.95, {a: givenErrorInfoA});
+
+    // THEN only the reliability message is returned, no quality/error notes appended
+    expect(actualResult).toContain('unreliable');
+    expect(actualResult).toContain('POOR RME');
+    expect(actualResult).not.toContain('noisy per-op stats');
+    expect(actualResult).not.toContain('inconsistent per-op stats');
+    expect(actualResult).not.toContain('were excluded due to errors');
+  });
+});
+
+describe("Test generateComparativeThroughputInterpretation function", () => {
+  function buildCompStats(overrides: Partial<Stats>): Stats {
+    return {
+      n: 31, min: 1, max: 10, mean: 5, median: 5, stddev: 1,
+      marginOfError: 0.35, relativeMarginOfError: 7.0,
+      confidenceInterval: [4.65, 5.35],
+      coefficientOfVariation: 0.05, skewness: 0, mad: 1, isSmallSample: false,
+      confidenceMethod: 'z', confidenceCriticalValue: 1.96, warnings: [],
+      ...overrides,
+    };
+  }
+
+  function buildTTest(overrides: Partial<WelchTTestResult> = {}): WelchTTestResult {
+    return {
+      t: -5, df: 18, pValue: 0.001, meanDifference: -5,
+      standardError: 1, confidenceInterval: [-7, -3],
+      ...overrides,
+    };
+  }
+
+  test("should return statistically significantly higher throughput when A outperforms B", () => {
+    // GIVEN Function A with higher throughput, significant p-value, clean stats
+    const givenFunctionAStats = buildCompStats({relativeMarginOfError: 5, coefficientOfVariation: 0.1, mean: 1, median: 1});
+    const givenFunctionBStats = buildCompStats({relativeMarginOfError: 5, coefficientOfVariation: 0.1, mean: 2, median: 2});
+    const givenTTest = buildTTest({pValue: 0.001, meanDifference: -1});
+
+    // WHEN generating comparative throughput interpretation with A=2000 ops/s, B=1000 ops/s
+    const actualResult = generateComparativeThroughputInterpretation(givenFunctionAStats, givenFunctionBStats, givenTTest, 0.95, 2000, 1000);
+
+    // THEN the lead message reports higher throughput with ops/sec
+    expect(actualResult).toContain('statistically significantly higher throughput');
+    expect(actualResult).toContain('2000 vs 1000 ops/sec');
+  });
+
+  test("should report practically negligible when throughput difference is less than 1%", () => {
+    // GIVEN very small throughput gap
+    const givenFunctionAStats = buildCompStats({relativeMarginOfError: 5, coefficientOfVariation: 0.1});
+    const givenFunctionBStats = buildCompStats({relativeMarginOfError: 5, coefficientOfVariation: 0.1});
+    const givenTTest = buildTTest({pValue: 0.001, meanDifference: -0.001});
+
+    // WHEN generating comparative throughput interpretation with a 0.05% ops-per-sec gap
+    const actualResult = generateComparativeThroughputInterpretation(givenFunctionAStats, givenFunctionBStats, givenTTest, 0.95, 1000.5, 1000);
+
+    // THEN it flags negligible
+    expect(actualResult).toContain('less than 1%');
+    expect(actualResult).toContain('practically negligible');
+  });
+
+  test("should report modest when throughput difference is 1-5%", () => {
+    // GIVEN throughput gap in the modest range
+    const givenFunctionAStats = buildCompStats({relativeMarginOfError: 5, coefficientOfVariation: 0.1});
+    const givenFunctionBStats = buildCompStats({relativeMarginOfError: 5, coefficientOfVariation: 0.1});
+    const givenTTest = buildTTest({pValue: 0.001, meanDifference: -0.05});
+
+    // WHEN generating comparative throughput interpretation with ~3% ops/sec gap
+    const actualResult = generateComparativeThroughputInterpretation(givenFunctionAStats, givenFunctionBStats, givenTTest, 0.95, 1030, 1000);
+
+    // THEN it describes the difference as modest
+    expect(actualResult).toContain('modest');
+  });
+
+  test("should report no significant evidence when A trends higher but p-value is high", () => {
+    // GIVEN marginal non-significant difference with A slightly faster
+    const givenFunctionAStats = buildCompStats({relativeMarginOfError: 5, coefficientOfVariation: 0.1});
+    const givenFunctionBStats = buildCompStats({relativeMarginOfError: 5, coefficientOfVariation: 0.1});
+    const givenTTest = buildTTest({pValue: 0.15, meanDifference: -0.1});
+
+    // WHEN generating comparative throughput interpretation
+    const actualResult = generateComparativeThroughputInterpretation(givenFunctionAStats, givenFunctionBStats, givenTTest, 0.95, 1100, 1000);
+
+    // THEN it reports no significance and suggests increasing duration
+    expect(actualResult).toContain('no statistically significant evidence');
+    expect(actualResult).toContain('trends higher');
+    expect(actualResult).toContain('increase duration');
+  });
+
+  test("should report identical throughput when mean difference is zero", () => {
+    // GIVEN identical means
+    const givenFunctionAStats = buildCompStats({relativeMarginOfError: 5, coefficientOfVariation: 0.1});
+    const givenFunctionBStats = buildCompStats({relativeMarginOfError: 5, coefficientOfVariation: 0.1});
+    const givenTTest = buildTTest({pValue: 0.5, meanDifference: 0});
+
+    // WHEN generating comparative throughput interpretation
+    const actualResult = generateComparativeThroughputInterpretation(givenFunctionAStats, givenFunctionBStats, givenTTest, 0.95, 1000, 1000);
+
+    // THEN identical throughput is reported
+    expect(actualResult).toContain('identical throughput');
+  });
+
+  test("should report A has lower throughput when mean difference is positive", () => {
+    // GIVEN A is slower (higher per-op time) than B
+    const givenFunctionAStats = buildCompStats({relativeMarginOfError: 5, coefficientOfVariation: 0.1});
+    const givenFunctionBStats = buildCompStats({relativeMarginOfError: 5, coefficientOfVariation: 0.1});
+    const givenTTest = buildTTest({pValue: 0.99, meanDifference: 0.5});
+
+    // WHEN generating comparative throughput interpretation
+    const actualResult = generateComparativeThroughputInterpretation(givenFunctionAStats, givenFunctionBStats, givenTTest, 0.95, 500, 1000);
+
+    // THEN it reports A appears lower, not higher
+    expect(actualResult).toContain('appears to have lower throughput');
+    expect(actualResult).toContain('not higher');
+  });
+
+  test("should flag comparison as unreliable when Function A has POOR RME", () => {
+    // GIVEN Function A with POOR RME
+    const givenFunctionAStats = buildCompStats({relativeMarginOfError: 40, coefficientOfVariation: 0.5});
+    const givenFunctionBStats = buildCompStats({relativeMarginOfError: 5, coefficientOfVariation: 0.1});
+    const givenTTest = buildTTest({pValue: 0.01, meanDifference: -1});
+
+    // WHEN generating comparative throughput interpretation
+    const actualResult = generateComparativeThroughputInterpretation(givenFunctionAStats, givenFunctionBStats, givenTTest, 0.95, 1500, 1000);
+
+    // THEN reliability short-circuit flags Function A
+    expect(actualResult).toContain('unreliable');
+    expect(actualResult).toContain('Function A has');
+    expect(actualResult).toContain('POOR RME');
+  });
+
+  test("should append CV/MAD note for Function A when A has POOR CV with GOOD MAD", () => {
+    // GIVEN Function A with POOR CV and GOOD MAD (outliers inflating variance), B clean
+    const givenFunctionAStats = buildCompStats({relativeMarginOfError: 8, coefficientOfVariation: 0.5, mad: 0.3, mean: 1, median: 1});
+    const givenFunctionBStats = buildCompStats({relativeMarginOfError: 5, coefficientOfVariation: 0.1, mean: 2, median: 2});
+    const givenTTest = buildTTest({pValue: 0.001, meanDifference: -1});
+
+    // WHEN generating comparative throughput interpretation
+    const actualResult = generateComparativeThroughputInterpretation(givenFunctionAStats, givenFunctionBStats, givenTTest, 0.95, 2000, 1000);
+
+    // THEN the lead message is preserved and an outlier-removal note is appended for A
+    expect(actualResult).toMatch(/^Function A has statistically significantly higher throughput/);
+    expect(actualResult).toContain('Note: Function A has noisy per-op stats');
+    expect(actualResult).toContain("outliers: 'remove'");
+  });
+
+  test("should append inconsistent note for Function B when B has POOR CV with POOR MAD", () => {
+    // GIVEN Function B with POOR CV and POOR MAD
+    const givenFunctionAStats = buildCompStats({relativeMarginOfError: 5, coefficientOfVariation: 0.1, mean: 1, median: 1});
+    const givenFunctionBStats = buildCompStats({relativeMarginOfError: 8, coefficientOfVariation: 0.5, mad: 2, mean: 2, median: 2});
+    const givenTTest = buildTTest({pValue: 0.001, meanDifference: -1});
+
+    // WHEN generating comparative throughput interpretation
+    const actualResult = generateComparativeThroughputInterpretation(givenFunctionAStats, givenFunctionBStats, givenTTest, 0.95, 2000, 1000);
+
+    // THEN the note points to noise sources for Function B
+    expect(actualResult).toContain('Note: Function B has inconsistent per-op stats');
+    expect(actualResult).toContain('investigate noise sources');
+  });
+
+  test("should append operation-exclusion note for Function A when errorInfoA has errors", () => {
+    // GIVEN clean stats and errorInfoA with excluded operations
+    const givenFunctionAStats = buildCompStats({relativeMarginOfError: 5, coefficientOfVariation: 0.1, mean: 1, median: 1});
+    const givenFunctionBStats = buildCompStats({relativeMarginOfError: 5, coefficientOfVariation: 0.1, mean: 2, median: 2});
+    const givenTTest = buildTTest({pValue: 0.001, meanDifference: -1});
+    const givenErrorInfoA = {errorCount: 5, totalIterations: 200, allowedRate: 0.1};
+
+    // WHEN generating comparative throughput interpretation with errorInfo.a
+    const actualResult = generateComparativeThroughputInterpretation(givenFunctionAStats, givenFunctionBStats, givenTTest, 0.95, 2000, 1000, {a: givenErrorInfoA});
+
+    // THEN the throughput-flavoured operations-exclusion note is appended
+    expect(actualResult).toContain('Note: 5 of 200 operations for Function A failed and were excluded');
+    expect(actualResult).toContain('successful ops only');
+  });
+
+  test("should append operation-exclusion note for Function B when errorInfoB has errors", () => {
+    // GIVEN clean stats and errorInfoB with excluded operations
+    const givenFunctionAStats = buildCompStats({relativeMarginOfError: 5, coefficientOfVariation: 0.1, mean: 1, median: 1});
+    const givenFunctionBStats = buildCompStats({relativeMarginOfError: 5, coefficientOfVariation: 0.1, mean: 2, median: 2});
+    const givenTTest = buildTTest({pValue: 0.001, meanDifference: -1});
+    const givenErrorInfoB = {errorCount: 9, totalIterations: 300, allowedRate: 0.1};
+
+    // WHEN generating comparative throughput interpretation with errorInfo.b
+    const actualResult = generateComparativeThroughputInterpretation(givenFunctionAStats, givenFunctionBStats, givenTTest, 0.95, 2000, 1000, {b: givenErrorInfoB});
+
+    // THEN an operations-exclusion note is appended for Function B only
+    expect(actualResult).toContain('Note: 9 of 300 operations for Function B failed and were excluded');
+    expect(actualResult).not.toContain('for Function A failed');
+  });
+
+  test("should not append any Note when stats are clean and no errorInfo is provided", () => {
+    // GIVEN clean stats on both functions and no errorInfo
+    const givenFunctionAStats = buildCompStats({relativeMarginOfError: 5, coefficientOfVariation: 0.1, mean: 1, median: 1});
+    const givenFunctionBStats = buildCompStats({relativeMarginOfError: 5, coefficientOfVariation: 0.1, mean: 2, median: 2});
+    const givenTTest = buildTTest({pValue: 0.001, meanDifference: -1});
+
+    // WHEN generating comparative throughput interpretation
+    const actualResult = generateComparativeThroughputInterpretation(givenFunctionAStats, givenFunctionBStats, givenTTest, 0.95, 2000, 1000);
+
+    // THEN no quality Note is appended (regression guard)
+    expect(actualResult).not.toContain('Note:');
+  });
+
+  test("should NOT append quality notes when reliability short-circuit triggers (POOR RME)", () => {
+    // GIVEN Function B with POOR RME and errors — reliability short-circuit must bypass quality notes
+    const givenFunctionAStats = buildCompStats({relativeMarginOfError: 5, coefficientOfVariation: 0.1, mean: 1, median: 1});
+    const givenFunctionBStats = buildCompStats({relativeMarginOfError: 40, coefficientOfVariation: 0.5, mad: 2, mean: 2, median: 2});
+    const givenTTest = buildTTest({pValue: 0.01, meanDifference: -1});
+    const givenErrorInfoB = {errorCount: 5, totalIterations: 100, allowedRate: 0.1};
+
+    // WHEN generating comparative throughput interpretation
+    const actualResult = generateComparativeThroughputInterpretation(givenFunctionAStats, givenFunctionBStats, givenTTest, 0.95, 2000, 1000, {b: givenErrorInfoB});
+
+    // THEN only the reliability message is returned, no quality/error notes appended
+    expect(actualResult).toContain('unreliable');
+    expect(actualResult).toContain('POOR RME');
+    expect(actualResult).not.toContain('inconsistent per-op stats');
+    expect(actualResult).not.toContain('failed and were excluded');
   });
 });
 
