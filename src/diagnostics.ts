@@ -266,7 +266,7 @@ function formatNotSignificantResult(tTest: WelchTTestResult, absDiff: number, pc
  * Returns null when CV is not POOR — the caller skips the note entirely.
  */
 function formatComparativeCVNote(label: 'A' | 'B', cv: Tag | null, mad: Tag | null): string | null {
-  if (cv === null || cv.label !== 'POOR') return null;
+  if (cv?.label !== 'POOR') return null;
   if (mad !== null && mad.label !== 'POOR') {
     return `Function ${label} has noisy per-op stats (CV: ${formatTag(cv)}, MAD: ${formatTag(mad)}) — outliers are inflating variance; consider enabling outlier removal via { outliers: 'remove' }`;
   }
