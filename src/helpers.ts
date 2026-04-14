@@ -278,7 +278,7 @@ export function formatComparativeStatsBlock(opts: ComparativeStatsBlockOptions):
     formatDirection(tTest.meanDifference, absDiff, pctDiff),
     `Welch's t-test: t=${formatTStatistic(tTest.t)}, df=${tTest.df.toFixed(1)}, p=${formatPValue(tTest.pValue)} (one-sided)`,
     `Confidence interval for difference: ${(confidence * 100).toFixed(0)}% [${formatMs(tTest.confidenceInterval[0])}, ${formatMs(tTest.confidenceInterval[1])}]ms`,
-    `Result: ${generateComparisonInterpretation(statsA, statsB, tTest, confidence)}`,
+    `Result: ${generateComparisonInterpretation(statsA, statsB, tTest, confidence, {a: errorInfoA, b: errorInfoB})}`,
   ];
 
   return lines.join('\n');
@@ -545,7 +545,7 @@ export function formatComparativeThroughputStatsBlock(opts: ComparativeThroughpu
     formatThroughputComparisonLine(actualOpsPerSecondA, actualOpsPerSecondB),
     `Welch's t-test: t=${formatTStatistic(tTest.t)}, df=${tTest.df.toFixed(1)}, p=${formatPValue(tTest.pValue)} (one-sided)`,
     `Confidence interval for per-op difference: ${(confidence * 100).toFixed(0)}% [${formatMs(tTest.confidenceInterval[0])}, ${formatMs(tTest.confidenceInterval[1])}]ms`,
-    `Result: ${generateComparativeThroughputInterpretation(statsA, statsB, tTest, confidence, actualOpsPerSecondA, actualOpsPerSecondB)}`,
+    `Result: ${generateComparativeThroughputInterpretation(statsA, statsB, tTest, confidence, actualOpsPerSecondA, actualOpsPerSecondB, {a: errorInfoA, b: errorInfoB})}`,
   ];
 
   return lines.join('\n');
